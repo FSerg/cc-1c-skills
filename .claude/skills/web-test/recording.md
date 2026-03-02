@@ -191,7 +191,7 @@ Add voiceover to recorded videos. Captions shown via `showCaption()` are automat
 ### Prerequisites
 
 - **ffmpeg** — same as for video recording (ffprobe must be next to ffmpeg)
-- **node-edge-tts** — `npm install node-edge-tts` (for Edge TTS provider, free, no API key)
+- **node-edge-tts** — `npm install --prefix tools/tts node-edge-tts` (for Edge TTS provider, free, no API key). Also works if installed globally or at project level — the resolver tries multiple locations automatically
 
 ### Configuration in `.v8-project.json`
 

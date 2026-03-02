@@ -3059,6 +3059,36 @@ function resolveFfmpeg(explicit) {
 
 // ── TTS providers ──────────────────────────────────────────────────────────
 
+/** Resolve node-edge-tts module: global install → tools/tts/ → error with instructions. */
+let _edgeTtsModule = null;
+async function resolveEdgeTts() {
+  if (_edgeTtsModule) return _edgeTtsModule;
+
+  // 1. Global/project-level install (standard Node resolution)
+  try {
+    _edgeTtsModule = await import('node-edge-tts');
+    return _edgeTtsModule;
+  } catch { /* fall through */ }
+
+  // 2. tools/tts/ relative to project root
+  const __fn = fileURLToPath(import.meta.url);
+  const projectRoot = pathResolve(dirname(__fn), '..', '..', '..', '..');
+  const localPath = pathResolve(projectRoot, 'tools', 'tts', 'node_modules', 'node-edge-tts', 'dist', 'edge-tts.js');
+  if (fsExistsSync(localPath)) {
+    try {
+      _edgeTtsModule = await import(pathToFileURL(localPath).href);
+      return _edgeTtsModule;
+    } catch { /* fall through */ }
+  }
+
+  // 3. Error with instructions
+  throw new Error(
+    'node-edge-tts not found. Install it:\n' +
+    '  - npm install --prefix tools/tts node-edge-tts\n' +
+    '  - or: npm install node-edge-tts (global/project-level)'
+  );
+}
+
 /**
  * Edge TTS provider (free, no API key). Uses node-edge-tts package.
  * @param {string} text — text to synthesize
@@ -3066,10 +3096,7 @@ function resolveFfmpeg(explicit) {
  * @param {object} opts — { voice }
  */
 async function edgeTtsProvider(text, outputPath, opts = {}) {
-  // Resolve from tools/node_modules/ (next to ffmpeg)
-  const __fn = fileURLToPath(import.meta.url);
-  const ttsModulePath = pathResolve(dirname(__fn), '..', '..', '..', '..', 'tools', 'tts', 'node_modules', 'node-edge-tts', 'dist', 'edge-tts.js');
-  const { EdgeTTS } = await import(pathToFileURL(ttsModulePath).href);
+  const { EdgeTTS } = await resolveEdgeTts();
   const voice = opts.voice || 'ru-RU-DmitryNeural';
   const tts = new EdgeTTS({ voice });
   await Promise.race([
