@@ -2455,9 +2455,11 @@ export async function startRecording(outputPath, opts = {}) {
     '-framerate', String(fps),     // input framerate
     '-i', '-',                     // read from stdin
     '-c:v', 'libx264',            // H.264 codec
-    '-preset', 'ultrafast',        // fast encoding
+    '-preset', 'fast',             // good quality/speed balance
+    '-crf', '23',                  // default quality (good for screen content)
+    '-vf', 'scale=in_range=full:out_range=limited', // JPEG full→H.264 limited range
     '-pix_fmt', 'yuv420p',        // broad compatibility
-    '-color_range', 'pc',          // full range (0-255) — match JPEG input
+    '-color_range', 'tv',          // limited range (16-235) — standard for H.264 players
     '-movflags', '+faststart',     // web-friendly MP4
     resolvedPath
   ], { stdio: ['pipe', 'ignore', 'pipe'] });
