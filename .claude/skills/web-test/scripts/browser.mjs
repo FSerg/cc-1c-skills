@@ -11,7 +11,7 @@ import { spawn, execFileSync } from 'child_process';
 import { statSync, mkdirSync, existsSync as fsExistsSync, writeFileSync, readFileSync, rmSync } from 'fs';
 import { dirname, resolve as pathResolve, join as pathJoin, basename, extname } from 'path';
 import { tmpdir } from 'os';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import {
   readSectionsScript, readTabsScript, readCommandsScript,
   readFormScript, navigateSectionScript, openCommandScript,
@@ -3065,7 +3065,10 @@ function resolveFfmpeg(explicit) {
  * @param {object} opts — { voice }
  */
 async function edgeTtsProvider(text, outputPath, opts = {}) {
-  const { EdgeTTS } = await import('node-edge-tts');
+  // Resolve from tools/node_modules/ (next to ffmpeg)
+  const __fn = fileURLToPath(import.meta.url);
+  const ttsModulePath = pathResolve(dirname(__fn), '..', '..', '..', '..', 'tools', 'node_modules', 'node-edge-tts', 'dist', 'edge-tts.js');
+  const { EdgeTTS } = await import(pathToFileURL(ttsModulePath).href);
   const voice = opts.voice || 'ru-RU-DmitryNeural';
   const tts = new EdgeTTS({ voice });
   await Promise.race([
