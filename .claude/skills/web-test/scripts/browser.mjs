@@ -2714,7 +2714,7 @@ export async function addNarration(videoPath, opts = {}) {
   try {
     // Phase 1: Generate TTS audio for each caption
     const ttsFiles = [];
-    const BATCH_SIZE = 5;
+    const BATCH_SIZE = (opts.provider === 'elevenlabs') ? 2 : 5;
     for (let batchStart = 0; batchStart < captions.length; batchStart += BATCH_SIZE) {
       const batch = captions.slice(batchStart, batchStart + BATCH_SIZE);
       const promises = batch.map(async (cap, batchIdx) => {
@@ -2727,7 +2727,7 @@ export async function addNarration(videoPath, opts = {}) {
           try {
             await ttsProvider(cap.speech, ttsFile, ttsOpts);
           } catch (retryErr) {
-            warnings.push(`TTS failed for caption ${idx}: ${retryErr.message}`);
+            warnings.push(`TTS failed for caption ${idx}: ${retryErr.message || retryErr.cause?.message || String(retryErr)}`);
             // Generate 1s silence as placeholder
             generateSilence(ttsFile, 1, ffmpegPath);
           }
