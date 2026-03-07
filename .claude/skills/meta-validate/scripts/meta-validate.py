@@ -59,6 +59,18 @@ if not os.path.exists(object_path):
 
 resolved_path = os.path.abspath(object_path)
 
+# ── detect config directory (for cross-object checks) ────────
+
+config_dir = None
+probe = os.path.dirname(resolved_path)
+for _ in range(4):
+    if not probe:
+        break
+    if os.path.exists(os.path.join(probe, "Configuration.xml")):
+        config_dir = probe
+        break
+    probe = os.path.dirname(probe)
+
 # ── output infrastructure ────────────────────────────────────
 
 errors = 0
@@ -933,6 +945,35 @@ if props_node is not None:
                     report_warn('10. ChartOfAccounts: MaxExtDimensionCount>0 but ExtDimensionTypes is empty')
                     check10_issues += 1
                     print('[HINT] /meta-edit -Operation modify-property -Value "ExtDimensionTypes=ChartOfCharacteristicTypes.XXX"')
+
+    # Register: must have at least one registrar document
+    register_types = ('AccumulationRegister', 'AccountingRegister', 'CalculationRegister', 'InformationRegister')
+    if md_type in register_types and config_dir and obj_name != '(unknown)':
+        needs_registrar = True
+        # InformationRegister with WriteMode=Independent does not need a registrar
+        if md_type == 'InformationRegister':
+            write_mode = find(props_node, 'md:WriteMode')
+            if write_mode is None or inner_text(write_mode) != 'RecorderSubordinate':
+                needs_registrar = False
+        if needs_registrar:
+            reg_ref = f'{md_type}.{obj_name}'
+            docs_dir = os.path.join(config_dir, 'Documents')
+            has_registrar = False
+            if os.path.isdir(docs_dir):
+                for fname in os.listdir(docs_dir):
+                    if not fname.endswith('.xml'):
+                        continue
+                    fpath = os.path.join(docs_dir, fname)
+                    if not os.path.isfile(fpath):
+                        continue
+                    with open(fpath, 'r', encoding='utf-8-sig') as f:
+                        content = f.read()
+                    if reg_ref in content:
+                        has_registrar = True
+                        break
+            if not has_registrar:
+                report_warn(f"10. {md_type}: no registrar document found (none references '{reg_ref}' in RegisterRecords)")
+                check10_issues += 1
 
 if check10_ok and check10_issues == 0:
     report_ok("10. Cross-property consistency")

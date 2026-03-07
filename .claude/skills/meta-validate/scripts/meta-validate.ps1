@@ -54,6 +54,19 @@ if (-not (Test-Path $ObjectPath)) {
 
 $resolvedPath = (Resolve-Path $ObjectPath).Path
 
+# --- Detect config directory (for cross-object checks) ---
+
+$script:configDir = $null
+$probe = Split-Path $resolvedPath
+for ($depth = 0; $depth -lt 4; $depth++) {
+	if (-not $probe) { break }
+	if (Test-Path (Join-Path $probe "Configuration.xml")) {
+		$script:configDir = $probe
+		break
+	}
+	$probe = Split-Path $probe
+}
+
 # --- Output infrastructure ---
 
 $script:errors = 0
@@ -987,6 +1000,38 @@ if ($propsNode) {
 				Report-Warn "10. ChartOfAccounts: MaxExtDimensionCount>0 but ExtDimensionTypes is empty"
 				$check10Issues++
 				Write-Host "[HINT] /meta-edit -Operation modify-property -Value `"ExtDimensionTypes=ChartOfCharacteristicTypes.XXX`""
+			}
+		}
+	}
+
+	# Register: must have at least one registrar document
+	$registerTypes = @("AccumulationRegister","AccountingRegister","CalculationRegister","InformationRegister")
+	if ($registerTypes -contains $mdType -and $script:configDir -and $objName -ne "(unknown)") {
+		$needsRegistrar = $true
+		# InformationRegister with WriteMode=Independent does not need a registrar
+		if ($mdType -eq "InformationRegister") {
+			$writeMode = $propsNode.SelectSingleNode("md:WriteMode", $ns)
+			if (-not $writeMode -or $writeMode.InnerText -ne "RecorderSubordinate") {
+				$needsRegistrar = $false
+			}
+		}
+		if ($needsRegistrar) {
+			$regRef = "$mdType.$objName"
+			$docsDir = Join-Path $script:configDir "Documents"
+			$hasRegistrar = $false
+			if (Test-Path $docsDir) {
+				$docXmls = Get-ChildItem $docsDir -Filter "*.xml" -File -ErrorAction SilentlyContinue
+				foreach ($docXml in $docXmls) {
+					$content = [System.IO.File]::ReadAllText($docXml.FullName, [System.Text.Encoding]::UTF8)
+					if ($content.Contains($regRef)) {
+						$hasRegistrar = $true
+						break
+					}
+				}
+			}
+			if (-not $hasRegistrar) {
+				Report-Warn "10. $mdType`: no registrar document found (none references '$regRef' in RegisterRecords)"
+				$check10Issues++
 			}
 		}
 	}
