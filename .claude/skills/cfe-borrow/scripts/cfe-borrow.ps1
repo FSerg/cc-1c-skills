@@ -476,13 +476,23 @@ function Borrow-Form {
 	$formVersion = $srcFormEl.GetAttribute("version")
 	if (-not $formVersion) { $formVersion = "2.17" }
 
-	# Find direct children: AutoCommandBar, ChildItems (visual elements only)
+	# Find direct children: form properties, AutoCommandBar, ChildItems
 	$srcAutoCmd = $null
 	$srcChildItems = $null
+	$formProps = @()
+	$reachedVisual = $false
 	foreach ($fc in $srcFormEl.ChildNodes) {
 		if ($fc.NodeType -ne 'Element') { continue }
-		if ($fc.LocalName -eq 'AutoCommandBar' -and -not $srcAutoCmd) { $srcAutoCmd = $fc }
-		elseif ($fc.LocalName -eq 'ChildItems' -and -not $srcChildItems) { $srcChildItems = $fc }
+		if ($fc.LocalName -eq 'AutoCommandBar' -and -not $srcAutoCmd) {
+			$reachedVisual = $true; $srcAutoCmd = $fc; continue
+		}
+		if ($fc.LocalName -eq 'ChildItems' -and -not $srcChildItems) {
+			$reachedVisual = $true; $srcChildItems = $fc; continue
+		}
+		if (-not $reachedVisual) {
+			# Form-level properties before AutoCommandBar (WindowOpeningMode, AutoFillCheck, etc.)
+			$formProps += $fc.OuterXml
+		}
 	}
 
 	# Get OuterXml and strip redundant namespace redeclarations (they're on root <Form>)
@@ -496,6 +506,10 @@ function Borrow-Form {
 		$autoCmdXml = [regex]::Replace($autoCmdXml, '<CommandName>[^<]*</CommandName>', '<CommandName>0</CommandName>')
 		# Replace Autofill true → false
 		$autoCmdXml = $autoCmdXml -replace '<Autofill>true</Autofill>', '<Autofill>false</Autofill>'
+		# Strip DataPath (references base form attributes not present in extension)
+		$autoCmdXml = [regex]::Replace($autoCmdXml, '\s*<DataPath>[^<]*</DataPath>', '')
+		# Strip element-level Events (base form event handlers not present in extension)
+		$autoCmdXml = [regex]::Replace($autoCmdXml, '(?s)\s*<Events>.*?</Events>', '')
 	}
 
 	$childItemsXml = ""
@@ -504,6 +518,9 @@ function Borrow-Form {
 		$childItemsXml = [regex]::Replace($childItemsXml, $nsStripPattern, '')
 		# Replace all CommandName values with 0 in ChildItems too
 		$childItemsXml = [regex]::Replace($childItemsXml, '<CommandName>[^<]*</CommandName>', '<CommandName>0</CommandName>')
+		# Strip DataPath and element-level Events
+		$childItemsXml = [regex]::Replace($childItemsXml, '\s*<DataPath>[^<]*</DataPath>', '')
+		$childItemsXml = [regex]::Replace($childItemsXml, '(?s)\s*<Events>.*?</Events>', '')
 	} else {
 		$childItemsXml = "<ChildItems/>"
 	}
@@ -521,7 +538,11 @@ function Borrow-Form {
 	$formXmlSb.Append($formTag) | Out-Null
 	$formXmlSb.Append("`r`n") | Out-Null
 
-	# Part 1: visual elements (add leading tab to first line of each block)
+	# Part 1: form properties + visual elements
+	foreach ($propXml in $formProps) {
+		$propXml = [regex]::Replace($propXml, $nsStripPattern, '')
+		$formXmlSb.Append("`t$propXml`r`n") | Out-Null
+	}
 	if ($autoCmdXml) {
 		$formXmlSb.Append("`t$autoCmdXml") | Out-Null
 		$formXmlSb.Append("`r`n") | Out-Null
@@ -531,10 +552,14 @@ function Borrow-Form {
 	$formXmlSb.Append("`t<Attributes/>") | Out-Null
 	$formXmlSb.Append("`r`n") | Out-Null
 
-	# BaseForm: same visual elements, indented one more level
+	# BaseForm: form properties + same visual elements, indented one more level
 	$formXmlSb.Append("`t<BaseForm version=`"${formVersion}`">") | Out-Null
 	$formXmlSb.Append("`r`n") | Out-Null
 
+	foreach ($propXml in $formProps) {
+		$propXml = [regex]::Replace($propXml, $nsStripPattern, '')
+		$formXmlSb.Append("`t`t$propXml`r`n") | Out-Null
+	}
 	if ($autoCmdXml) {
 		# Reindent for BaseForm: first line gets 2 tabs, other lines get +1 tab
 		$acLines = $autoCmdXml -split "`r?`n"

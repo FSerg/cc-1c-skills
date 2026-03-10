@@ -653,14 +653,23 @@ def main():
 
         src_auto_cmd = None
         src_child_items = None
+        form_props = []
+        reached_visual = False
         for fc in src_form_el:
             if not isinstance(fc.tag, str):
                 continue
             ln = localname(fc)
             if ln == "AutoCommandBar" and src_auto_cmd is None:
+                reached_visual = True
                 src_auto_cmd = fc
-            elif ln == "ChildItems" and src_child_items is None:
+                continue
+            if ln == "ChildItems" and src_child_items is None:
+                reached_visual = True
                 src_child_items = fc
+                continue
+            if not reached_visual:
+                # Form-level properties before AutoCommandBar (WindowOpeningMode, AutoFillCheck, etc.)
+                form_props.append(etree.tostring(fc, encoding="unicode"))
 
         ns_strip_pattern = re.compile(r'\s+xmlns(?::\w+)?="[^"]*"')
 
@@ -670,12 +679,19 @@ def main():
             auto_cmd_xml = ns_strip_pattern.sub("", auto_cmd_xml)
             auto_cmd_xml = re.sub(r'<CommandName>[^<]*</CommandName>', '<CommandName>0</CommandName>', auto_cmd_xml)
             auto_cmd_xml = auto_cmd_xml.replace('<Autofill>true</Autofill>', '<Autofill>false</Autofill>')
+            # Strip DataPath (references base form attributes not present in extension)
+            auto_cmd_xml = re.sub(r'\s*<DataPath>[^<]*</DataPath>', '', auto_cmd_xml)
+            # Strip element-level Events (base form event handlers not present in extension)
+            auto_cmd_xml = re.sub(r'\s*<Events>.*?</Events>', '', auto_cmd_xml, flags=re.DOTALL)
 
         child_items_xml = ""
         if src_child_items is not None:
             child_items_xml = etree.tostring(src_child_items, encoding="unicode")
             child_items_xml = ns_strip_pattern.sub("", child_items_xml)
             child_items_xml = re.sub(r'<CommandName>[^<]*</CommandName>', '<CommandName>0</CommandName>', child_items_xml)
+            # Strip DataPath and element-level Events
+            child_items_xml = re.sub(r'\s*<DataPath>[^<]*</DataPath>', '', child_items_xml)
+            child_items_xml = re.sub(r'\s*<Events>.*?</Events>', '', child_items_xml, flags=re.DOTALL)
         else:
             child_items_xml = "<ChildItems/>"
 
@@ -696,6 +712,10 @@ def main():
         parts.append(form_tag)
         parts.append("\r\n")
 
+        # Form properties (WindowOpeningMode, AutoFillCheck, etc.)
+        for prop_xml in form_props:
+            prop_xml_clean = ns_strip_pattern.sub("", prop_xml)
+            parts.append(f"\t{prop_xml_clean}\r\n")
         if auto_cmd_xml:
             parts.append(f"\t{auto_cmd_xml}\r\n")
         parts.append(f"\t{child_items_xml}\r\n")
@@ -704,6 +724,9 @@ def main():
         # BaseForm
         parts.append(f'\t<BaseForm version="{form_version}">\r\n')
 
+        for prop_xml in form_props:
+            prop_xml_clean = ns_strip_pattern.sub("", prop_xml)
+            parts.append(f"\t\t{prop_xml_clean}\r\n")
         if auto_cmd_xml:
             ac_lines = auto_cmd_xml.split("\n")
             for li, line in enumerate(ac_lines):
