@@ -489,7 +489,7 @@ function Borrow-Form {
 		if ($fc.LocalName -eq 'ChildItems' -and -not $srcChildItems) {
 			$reachedVisual = $true; $srcChildItems = $fc; continue
 		}
-		if ($fc.LocalName -eq 'Events' -or $fc.LocalName -eq 'Attributes' -or $fc.LocalName -eq 'Commands' -or $fc.LocalName -eq 'Parameters') {
+		if ($fc.LocalName -eq 'Events' -or $fc.LocalName -eq 'Attributes' -or $fc.LocalName -eq 'Commands' -or $fc.LocalName -eq 'Parameters' -or $fc.LocalName -eq 'CommandSet') {
 			$reachedVisual = $true; continue
 		}
 		if (-not $reachedVisual) {
@@ -507,6 +507,8 @@ function Borrow-Form {
 		$autoCmdXml = [regex]::Replace($autoCmdXml, $nsStripPattern, '')
 		$autoCmdXml = [regex]::Replace($autoCmdXml, '<CommandName>[^<]*</CommandName>', '<CommandName>0</CommandName>')
 		$autoCmdXml = $autoCmdXml -replace '<Autofill>true</Autofill>', '<Autofill>false</Autofill>'
+		# Strip ExcludedCommand (references to standard commands invalid in extension)
+		$autoCmdXml = [regex]::Replace($autoCmdXml, '\s*<ExcludedCommand>[^<]*</ExcludedCommand>', '')
 	}
 
 	# ChildItems: copy full tree, clean up base-config references
@@ -520,6 +522,10 @@ function Borrow-Form {
 		$childItemsXml = [regex]::Replace($childItemsXml, '\s*<DataPath>[^<]*</DataPath>', '')
 		# Strip TitleDataPath (e.g. Объект.Товары.RowsCount — invalid without base attributes)
 		$childItemsXml = [regex]::Replace($childItemsXml, '\s*<TitleDataPath>[^<]*</TitleDataPath>', '')
+		# Strip RowPictureDataPath (e.g. Список.СостояниеДокумента — invalid in extension)
+		$childItemsXml = [regex]::Replace($childItemsXml, '\s*<RowPictureDataPath>[^<]*</RowPictureDataPath>', '')
+		# Strip ExcludedCommand in nested AutoCommandBars (references to standard commands invalid in extension)
+		$childItemsXml = [regex]::Replace($childItemsXml, '\s*<ExcludedCommand>[^<]*</ExcludedCommand>', '')
 		# Strip TypeLink blocks with human-readable DataPath (Items.XXX — can't convert to UUID)
 		$childItemsXml = [regex]::Replace($childItemsXml, '(?s)\s*<TypeLink>\s*<xr:DataPath>Items\.[^<]*</xr:DataPath>.*?</TypeLink>', '')
 		# Strip element-level Events (base form handlers not in extension)

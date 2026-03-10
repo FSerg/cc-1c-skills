@@ -662,7 +662,7 @@ def main():
                 reached_visual = True
                 src_auto_cmd = fc
                 continue
-            if ln in ("ChildItems", "Events", "Attributes", "Commands", "Parameters"):
+            if ln in ("ChildItems", "Events", "Attributes", "Commands", "Parameters", "CommandSet"):
                 reached_visual = True
                 continue
             if not reached_visual:
@@ -678,6 +678,8 @@ def main():
             auto_cmd_xml = ns_strip_pattern.sub("", auto_cmd_xml)
             auto_cmd_xml = re.sub(r'<CommandName>[^<]*</CommandName>', '<CommandName>0</CommandName>', auto_cmd_xml)
             auto_cmd_xml = auto_cmd_xml.replace('<Autofill>true</Autofill>', '<Autofill>false</Autofill>')
+            # Strip ExcludedCommand (references to standard commands invalid in extension)
+            auto_cmd_xml = re.sub(r'\s*<ExcludedCommand>[^<]*</ExcludedCommand>', '', auto_cmd_xml)
 
         # ChildItems: copy full tree, clean up base-config references
         child_items_xml = ""
@@ -696,6 +698,10 @@ def main():
             child_items_xml = re.sub(r'\s*<DataPath>[^<]*</DataPath>', '', child_items_xml)
             # Strip TitleDataPath
             child_items_xml = re.sub(r'\s*<TitleDataPath>[^<]*</TitleDataPath>', '', child_items_xml)
+            # Strip RowPictureDataPath (e.g. Список.СостояниеДокумента — invalid in extension)
+            child_items_xml = re.sub(r'\s*<RowPictureDataPath>[^<]*</RowPictureDataPath>', '', child_items_xml)
+            # Strip ExcludedCommand in nested AutoCommandBars (references to standard commands invalid in extension)
+            child_items_xml = re.sub(r'\s*<ExcludedCommand>[^<]*</ExcludedCommand>', '', child_items_xml)
             # Strip TypeLink blocks with human-readable DataPath (Items.XXX)
             child_items_xml = re.sub(r'\s*<TypeLink>\s*<xr:DataPath>Items\.[^<]*</xr:DataPath>.*?</TypeLink>', '', child_items_xml, flags=re.DOTALL)
             # Strip element-level Events
