@@ -1363,11 +1363,25 @@ export async function clickElement(text, { dblclick } = {}) {
     // No match in popup — fall through to form elements
   }
 
-  const formNum = await page.evaluate(detectFormScript());
+  let formNum = await page.evaluate(detectFormScript());
   if (formNum === null) throw new Error(`clickElement: no form found`);
 
   // Find the target element ID
-  const target = await page.evaluate(findClickTargetScript(formNum, text));
+  let target = await page.evaluate(findClickTargetScript(formNum, text));
+
+  // Retry: if not found, a modal form may still be loading (e.g. after F4).
+  // Wait up to 2s for a new form to appear and re-detect.
+  if (target?.error) {
+    for (let retry = 0; retry < 4; retry++) {
+      await page.waitForTimeout(500);
+      const newForm = await page.evaluate(detectFormScript());
+      if (newForm !== null && newForm !== formNum) {
+        formNum = newForm;
+        target = await page.evaluate(findClickTargetScript(formNum, text));
+        if (!target?.error) break;
+      }
+    }
+  }
   if (target?.error) throw new Error(`clickElement: "${text}" not found. Available: ${target.available?.join(', ') || 'none'}`);
 
   // Grid row targets — use coordinate click (single or double)
