@@ -3331,15 +3331,20 @@ export async function addNarration(videoPath, opts = {}) {
 
       const label = `a${i}`;
       mixLabels.push(`[${label}]`);
-      filterParts.push(`[${i}]${filters.length ? filters.join(',') : 'acopy'}[${label}]`);
+      // Input indices are shifted by 1 because silence reference is input [0]
+      filterParts.push(`[${i + 1}]${filters.length ? filters.join(',') : 'acopy'}[${label}]`);
     }
 
+    // Generate a silence reference track as input [0] so amix runs for full video duration
+    const silencePath = pathJoin(tempDir, 'silence.mp3');
+    generateSilence(silencePath, Math.ceil(videoDuration), ffmpegPath);
+
     const filterComplex = filterParts.join(';') + ';' +
-      mixLabels.join('') + `amix=inputs=${captions.length}:normalize=0`;
+      `[0]${mixLabels.join('')}amix=inputs=${captions.length + 1}:normalize=0:duration=first`;
 
     const narrationPath = pathJoin(tempDir, 'narration.mp3');
     execFileSync(ffmpegPath, [
-      '-y', ...ffmpegInputs,
+      '-y', '-i', silencePath, ...ffmpegInputs,
       '-filter_complex', filterComplex,
       '-t', String(Math.ceil(videoDuration)),
       '-c:a', 'libmp3lame', '-b:a', '128k', narrationPath,
