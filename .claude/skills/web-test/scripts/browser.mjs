@@ -739,72 +739,50 @@ export async function readSpreadsheet() {
 }
 
 /**
- * Pick a value from an opened selection form: filter + dblclick matching row.
- *
- * Strategy:
- *   - string: simple search via filterList → dblclick first row
- *   - object: advanced search (Alt+F) for each field sequentially
- *     (searches by specific column, efficient on large tables) → dblclick positioned row
- *
- * @param {number} selFormNum - selection form number
- * @param {string} fieldName - field being filled (for error messages)
- * @param {string|Object} search - string for simple search, or { field: value } for per-field search
- * @param {number} origFormNum - original form number (to verify we returned)
- * @returns {{ field, ok, method }} or {{ field, error, message }}
+ * Scan visible grid rows for a text match (exact → startsWith → includes).
+ * Returns center coords of the matched row, or null if not found.
+ * When searchLower is empty, returns coords of the first row (fallback).
  */
-async function pickFromSelectionForm(selFormNum, fieldName, search, origFormNum) {
-  // 1. Apply filters based on search type
-  if (typeof search === 'string') {
-    // Simple text search
-    if (search) {
-      try {
-        await filterList(search);
-      } catch (e) {
-        await page.keyboard.press('Escape');
-        await waitForStable();
-        return { field: fieldName, error: 'filter_failed', message: e.message };
-      }
-    }
-  } else if (search && typeof search === 'object') {
-    // Per-field advanced search (Alt+F) for each entry — searches by specific column,
-    // more efficient than simple search on large tables (no full-text scan across all columns).
-    const entries = Object.entries(search);
-    for (const [fld, val] of entries) {
-      try {
-        await filterList(String(val), { field: fld });
-      } catch (e) {
-        // Advanced search failed — fall through and try with what we have
-      }
-    }
-  }
-
-  // 2. Find the target row — currently selected (positioned by advanced search) or first
-  const rowTarget = await page.evaluate(`(() => {
-    const p = 'form${selFormNum}_';
+async function scanGridRows(formNum, searchLower) {
+  return page.evaluate(`(() => {
+    const p = 'form${formNum}_';
     const grid = document.querySelector('[id^="' + p + '"].grid, [id^="' + p + '"] .grid');
     if (!grid) return null;
     const body = grid.querySelector('.gridBody');
     if (!body) return null;
     const lines = [...body.querySelectorAll('.gridLine')];
     if (!lines.length) return { rowCount: 0 };
-    // Prefer selected/active row (positioned by advanced search), fall back to first
-    const sel = lines.find(l => l.classList.contains('select') || l.classList.contains('active')) || lines[0];
+    const searchLower = ${JSON.stringify(searchLower || '')};
+    let sel = null;
+    if (searchLower) {
+      const norm = s => (s || '').replace(/\\u00a0/g, ' ').trim().toLowerCase().replace(/ё/gi, 'е');
+      const rowData = lines.map(l => ({ el: l, text: norm(l.innerText) }));
+      sel = rowData.find(r => r.text === searchLower)?.el
+        || rowData.find(r => r.text.startsWith(searchLower))?.el
+        || rowData.find(r => r.text.includes(searchLower))?.el;
+    } else {
+      sel = lines[0]; // empty search → first row
+    }
+    if (!sel) return null;
     const r = sel.getBoundingClientRect();
-    return { rowCount: lines.length, matched: true,
-      x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+    return { rowCount: lines.length, x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
   })()`);
+}
 
-  if (!rowTarget?.matched) {
-    await page.keyboard.press('Escape');
-    await waitForStable();
-    const searchDesc = typeof search === 'string' ? '"' + search + '"' : JSON.stringify(search);
-    return { field: fieldName, error: 'not_found',
-      message: 'No matches in selection form for ' + searchDesc +
-        (rowTarget?.rowCount === 0 ? ' (grid empty)' : '') };
-  }
-
-  // 3. Dblclick the target row
-  await page.mouse.dblclick(rowTarget.x, rowTarget.y);
+/**
+ * Select a row in a selection form via click + Enter, verify it closed.
+ * Uses click + Enter instead of dblclick because dblclick toggles
+ * expand/collapse in tree-style selection forms.
+ * Returns { field, ok: true, method: 'form' } on success,
+ * or { field, ok: false, reason: 'still_open' } if the item couldn't be selected (e.g. group row).
+ */
+async function dblclickAndVerify(coords, selFormNum, fieldName) {
+  // Click to highlight the row, then Enter to confirm selection.
+  // This works for both flat grids and tree forms (dblclick would
+  // toggle expand/collapse on tree group rows).
+  await page.mouse.click(coords.x, coords.y);
+  await page.waitForTimeout(200);
+  await page.keyboard.press('Enter');
   await waitForStable(selFormNum);
 
   // Verify selection form closed
@@ -813,19 +791,9 @@ async function pickFromSelectionForm(selFormNum, fieldName, search, origFormNum)
     return [...document.querySelectorAll('[id^="' + p + '"]')].some(el => el.offsetWidth > 0);
   })()`);
   if (stillOpen) {
-    // Dblclick may have opened a folder — try Enter to select current row
-    await page.keyboard.press('Enter');
-    await waitForStable(selFormNum);
-
-    // Still open? Close and report
-    const stillOpen2 = await page.evaluate(`(() => {
-      const p = 'form${selFormNum}_';
-      return [...document.querySelectorAll('[id^="' + p + '"]')].some(el => el.offsetWidth > 0);
-    })()`);
-    if (stillOpen2) {
-      await page.keyboard.press('Escape');
-      await waitForStable();
-    }
+    // Enter didn't select — item is likely a non-selectable group.
+    // Don't Escape here — let the caller decide (may want to try another row).
+    return { field: fieldName, ok: false, reason: 'still_open' };
   }
 
   // Check for 1C error modals after selection
@@ -837,6 +805,187 @@ async function pickFromSelectionForm(selFormNum, fieldName, search, origFormNum)
     } catch { /* OK */ }
   }
   return { field: fieldName, ok: true, method: 'form' };
+}
+
+/**
+ * Inline advanced search on a selection form via Alt+F.
+ * Does NOT click any column — FieldSelector auto-populates with main representation.
+ * Switches to "по части строки" (CompareType#1) to avoid composite type issues.
+ * Does not throw — returns silently on failure.
+ */
+async function advancedSearchInline(formNum, text) {
+  try {
+    // 1. Open advanced search via Alt+F
+    await page.keyboard.press('Alt+f');
+    await page.waitForTimeout(2000);
+
+    const dialogForm = await page.evaluate(detectFormScript());
+    if (dialogForm === formNum || dialogForm === null) return; // Alt+F didn't open dialog
+
+    // 2. Switch to "по части строки" (CompareType#1)
+    const radioClicked = await page.evaluate(`(() => {
+      const p = 'form${dialogForm}_';
+      const el = document.getElementById(p + 'CompareType#1#radio');
+      if (!el || el.offsetWidth === 0) return false;
+      if (el.classList.contains('select')) return true; // already selected
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+    })()`);
+    if (radioClicked && typeof radioClicked === 'object') {
+      await page.mouse.click(radioClicked.x, radioClicked.y);
+      await page.waitForTimeout(300);
+    }
+
+    // 3. Fill Pattern field via clipboard paste
+    const patternId = await page.evaluate(`(() => {
+      const p = 'form${dialogForm}_';
+      const el = [...document.querySelectorAll('input.editInput[id^="' + p + '"]')]
+        .find(el => el.offsetWidth > 0 && /Pattern/i.test(el.id));
+      return el ? el.id : null;
+    })()`);
+    if (!patternId) {
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+      return;
+    }
+    await page.click(`[id="${patternId}"]`);
+    await page.waitForTimeout(200);
+    await page.keyboard.press('Control+A');
+    await page.evaluate(`navigator.clipboard.writeText(${JSON.stringify(String(text))})`);
+    await page.keyboard.press('Control+V');
+    await page.waitForTimeout(300);
+
+    // 4. Click "Найти"
+    const findBtn = await page.evaluate(`(() => {
+      const btns = [...document.querySelectorAll('a.press')].filter(el => el.offsetWidth > 0);
+      const btn = btns.find(el => el.innerText?.trim() === 'Найти');
+      if (!btn) return null;
+      const r = btn.getBoundingClientRect();
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+    })()`);
+    if (findBtn) {
+      await page.mouse.click(findBtn.x, findBtn.y);
+      await page.waitForTimeout(2000);
+    }
+
+    // 5. Close advanced search dialog
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const dialogVisible = await page.evaluate(`(() => {
+        const p = 'form${dialogForm}_';
+        return [...document.querySelectorAll('[id^="' + p + '"]')].some(el => el.offsetWidth > 0);
+      })()`);
+      if (!dialogVisible) break;
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(500);
+    }
+    await waitForStable(formNum);
+  } catch { /* silently fail — caller will re-scan and handle not_found */ }
+}
+
+/**
+ * Pick a value from an opened selection form.
+ *
+ * Strategy (escalating):
+ *   1. Scan visible rows for text match (exact → startsWith → includes)
+ *   2. Simple search (search input + Enter) → re-scan
+ *   3. Advanced search (Alt+F, "по части строки") → re-scan
+ *   4. Not found → Escape → error
+ *
+ * For object search {field: value}: steps 1, then filterList(val, {field}) per entry, then re-scan.
+ * For empty search: pick first visible row.
+ *
+ * @param {number} selFormNum - selection form number
+ * @param {string} fieldName - field being filled (for error messages)
+ * @param {string|Object} search - string for simple search, or { field: value } for per-field search
+ * @param {number} origFormNum - original form number (to verify we returned)
+ * @returns {{ field, ok, method }} or {{ field, error, message }}
+ */
+async function pickFromSelectionForm(selFormNum, fieldName, search, origFormNum) {
+  const searchText = typeof search === 'string'
+    ? search : (search ? Object.values(search).join(' ') : '');
+  const searchLower = normYo((searchText || '').toLowerCase());
+
+  // Helper: try to select a row; returns result if ok, null if item wasn't selectable (group).
+  let hadUnselectableMatch = false;
+  async function trySelect(row) {
+    const r = await dblclickAndVerify(row, selFormNum, fieldName);
+    if (r.ok) return r;
+    hadUnselectableMatch = true; // found match but couldn't select (group row)
+    return null; // form still open, try next step
+  }
+
+  // Step 1: Scan visible rows (no filtering)
+  if (searchLower) {
+    const row = await scanGridRows(selFormNum, searchLower);
+    if (row?.x) {
+      const r = await trySelect(row);
+      if (r) return r;
+    }
+  }
+
+  // Step 2: Simple search via search input (directly on the known form, avoids filterList form-detection)
+  if (typeof search === 'string' && searchLower) {
+    const searchInputId = await page.evaluate(`(() => {
+      const p = 'form${selFormNum}_';
+      const el = [...document.querySelectorAll('input.editInput[id^="' + p + '"]')]
+        .find(el => el.offsetWidth > 0 && /Строк[аи]Поиска|SearchString/i.test(el.id));
+      return el ? el.id : null;
+    })()`);
+    if (searchInputId) {
+      try {
+        await page.click(`[id="${searchInputId}"]`);
+        await page.waitForTimeout(200);
+        await page.keyboard.press('Control+A');
+        await page.evaluate(`navigator.clipboard.writeText(${JSON.stringify(String(searchText))})`);
+        await page.keyboard.press('Control+V');
+        await page.waitForTimeout(300);
+        await page.keyboard.press('Enter');
+        await waitForStable(selFormNum);
+      } catch { /* proceed to advanced search */ }
+      const row = await scanGridRows(selFormNum, searchLower);
+      if (row?.x) {
+        const r = await trySelect(row);
+        if (r) return r;
+      }
+    }
+  }
+
+  // Step 3: Advanced search
+  if (typeof search === 'object' && search) {
+    // Per-field advanced search via filterList(val, {field})
+    for (const [fld, val] of Object.entries(search)) {
+      try { await filterList(String(val), { field: fld }); } catch { /* proceed */ }
+    }
+  } else if (searchLower) {
+    // Inline advanced search (Alt+F, "по части строки")
+    await advancedSearchInline(selFormNum, searchText);
+  }
+  if (searchLower) {
+    const row = await scanGridRows(selFormNum, searchLower);
+    if (row?.x) {
+      const r = await trySelect(row);
+      if (r) return r;
+    }
+  }
+
+  // Step 4: Empty search → pick first row; otherwise not found
+  if (!searchLower) {
+    const row = await scanGridRows(selFormNum, '');
+    if (row?.x) {
+      const r = await trySelect(row);
+      if (r) return r;
+    }
+  }
+
+  await page.keyboard.press('Escape');
+  await waitForStable();
+  const searchDesc = typeof search === 'string' ? '"' + search + '"' : JSON.stringify(search);
+  if (hadUnselectableMatch) {
+    return { field: fieldName, error: 'not_selectable',
+      message: 'Found ' + searchDesc + ' in selection form but it is not selectable (group/folder row)' };
+  }
+  return { field: fieldName, error: 'not_found',
+    message: 'No matches in selection form for ' + searchDesc };
 }
 
 /**
@@ -1985,34 +2134,266 @@ export async function fillTableRow(fields, { tab, add, row } = {}) {
 
     if (cellCoords.error) throw new Error(`fillTableRow: ${cellCoords.error}${cellCoords.total ? ' (total rows: ' + cellCoords.total + ')' : ''}`);
 
-    await page.mouse.dblclick(cellCoords.x, cellCoords.y);
-    // Poll for edit mode instead of fixed 500ms wait
+    // Click first (tree grids enter edit on single click; dblclick toggles expand/collapse).
+    // Then escalate: dblclick → F4 if needed.
+    await page.mouse.click(cellCoords.x, cellCoords.y);
     let inEdit = false;
-    for (let dw = 0; dw < 5; dw++) {
+    let directEditForm = null;
+    for (let dw = 0; dw < 4; dw++) {
       await page.waitForTimeout(150);
       inEdit = await page.evaluate(`(() => {
         const f = document.activeElement;
         return f && f.tagName === 'INPUT';
       })()`);
       if (inEdit) break;
+      directEditForm = await page.evaluate(`(() => {
+        const forms = {};
+        document.querySelectorAll('[id]').forEach(el => {
+          if (el.offsetWidth === 0 && el.offsetHeight === 0) return;
+          const m = el.id.match(/^form(\\d+)_/);
+          if (m) forms[m[1]] = true;
+        });
+        const nums = Object.keys(forms).map(Number).filter(n => n > ${formNum});
+        return nums.length > 0 ? Math.max(...nums) : null;
+      })()`);
+      if (directEditForm !== null) break;
     }
-    if (!inEdit) throw new Error(`fillTableRow: double-click on row ${row} did not enter edit mode`);
-  }
-
-  // 3. Verify we're in grid edit mode (active INPUT inside a .grid)
-  const editCheck = await page.evaluate(`(() => {
-    const f = document.activeElement;
-    if (!f || f.tagName !== 'INPUT') return { inEdit: false, tag: f?.tagName };
-    let node = f;
-    while (node) {
-      if (node.classList?.contains('grid')) return { inEdit: true };
-      node = node.parentElement;
+    // Click didn't enter edit — try dblclick (works for flat grids)
+    if (!inEdit && directEditForm === null) {
+      await page.mouse.dblclick(cellCoords.x, cellCoords.y);
+      for (let dw = 0; dw < 4; dw++) {
+        await page.waitForTimeout(150);
+        inEdit = await page.evaluate(`(() => {
+          const f = document.activeElement;
+          return f && f.tagName === 'INPUT';
+        })()`);
+        if (inEdit) break;
+        directEditForm = await page.evaluate(`(() => {
+          const forms = {};
+          document.querySelectorAll('[id]').forEach(el => {
+            if (el.offsetWidth === 0 && el.offsetHeight === 0) return;
+            const m = el.id.match(/^form(\\d+)_/);
+            if (m) forms[m[1]] = true;
+          });
+          const nums = Object.keys(forms).map(Number).filter(n => n > ${formNum});
+          return nums.length > 0 ? Math.max(...nums) : null;
+        })()`);
+        if (directEditForm !== null) break;
+      }
     }
-    return { inEdit: false, hint: 'input not inside grid' };
-  })()`);
+    // Still nothing — try F4 (opens selection for direct-edit cells)
+    if (!inEdit && directEditForm === null) {
+      await page.keyboard.press('F4');
+      for (let fw = 0; fw < 8; fw++) {
+        await page.waitForTimeout(200);
+        inEdit = await page.evaluate(`(() => {
+          const f = document.activeElement;
+          return f && f.tagName === 'INPUT';
+        })()`);
+        if (inEdit) break;
+        directEditForm = await page.evaluate(`(() => {
+          const forms = {};
+          document.querySelectorAll('[id]').forEach(el => {
+            if (el.offsetWidth === 0 && el.offsetHeight === 0) return;
+            const m = el.id.match(/^form(\\d+)_/);
+            if (m) forms[m[1]] = true;
+          });
+          const nums = Object.keys(forms).map(Number).filter(n => n > ${formNum});
+          return nums.length > 0 ? Math.max(...nums) : null;
+        })()`);
+        if (directEditForm !== null) break;
+      }
+    }
 
-  if (!editCheck.inEdit) {
-    throw new Error('fillTableRow: not in grid edit mode. Use add:true or click a cell first.');
+    // When click entered INPUT mode but no selection form yet — try F4 (tree grid ref fields)
+    if (inEdit && directEditForm === null) {
+      await page.keyboard.press('F4');
+      for (let fw = 0; fw < 8; fw++) {
+        await page.waitForTimeout(200);
+        directEditForm = await page.evaluate(`(() => {
+          const forms = {};
+          document.querySelectorAll('[id]').forEach(el => {
+            if (el.offsetWidth === 0 && el.offsetHeight === 0) return;
+            const m = el.id.match(/^form(\\d+)_/);
+            if (m) forms[m[1]] = true;
+          });
+          const nums = Object.keys(forms).map(Number).filter(n => n > ${formNum});
+          return nums.length > 0 ? Math.max(...nums) : null;
+        })()`);
+        if (directEditForm !== null) break;
+      }
+      // If F4 didn't open a selection form, the cell is a plain text field — fall through to Tab loop
+    }
+
+    // Direct-edit mode: selection form opened on dblclick/F4 (e.g. tree grid with immediate editing).
+    // Handle each field by picking from selection form, then dblclick next cell.
+    if (directEditForm !== null) {
+      const pending = new Map();
+      for (const [key, val] of Object.entries(fields)) {
+        if (val && typeof val === 'object' && 'value' in val) {
+          pending.set(key, { value: String(val.value), type: val.type || null, filled: false });
+        } else {
+          pending.set(key, { value: String(val), type: null, filled: false });
+        }
+      }
+      const results = [];
+
+      // Helper: handle type dialog + pick from selection form
+      async function directEditPick(openedForm, key, info) {
+        let selForm = openedForm;
+        // Check if opened form is a type selection dialog (composite type field)
+        if (await isTypeDialog(selForm)) {
+          if (info.type) {
+            await pickFromTypeDialog(selForm, info.type);
+            await waitForStable(selForm);
+            // After type selection, detect the actual selection form
+            selForm = await page.evaluate(`(() => {
+              const forms = {};
+              document.querySelectorAll('[id]').forEach(el => {
+                if (el.offsetWidth === 0 && el.offsetHeight === 0) return;
+                const m = el.id.match(/^form(\\d+)_/);
+                if (m) forms[m[1]] = true;
+              });
+              const nums = Object.keys(forms).map(Number).filter(n => n > ${formNum});
+              return nums.length > 0 ? Math.max(...nums) : null;
+            })()`);
+            if (selForm === null) {
+              return { field: key, error: 'no_selection_after_type', message: `Type selected but no selection form opened for "${key}"` };
+            }
+          } else {
+            // No type specified — close type dialog and report error
+            await page.keyboard.press('Escape');
+            await page.waitForTimeout(300);
+            return { field: key, error: 'composite_type', message: `Composite type field "${key}" requires {value, type}` };
+          }
+        }
+        const pr = await pickFromSelectionForm(selForm, key, info.value, formNum);
+        return pr.ok ? { field: key, ok: true, method: 'form' } : { field: key, error: pr.error, message: pr.message };
+      }
+
+      // First field: selection form is already open from the dblclick above
+      const firstKey = Object.keys(fields)[0];
+      const firstInfo = pending.get(firstKey);
+      const pickResult = await directEditPick(directEditForm, firstKey, firstInfo);
+      firstInfo.filled = true;
+      results.push(pickResult);
+
+      // Remaining fields: dblclick on each column cell individually
+      for (const [key, info] of pending) {
+        if (info.filled) continue;
+        // Find column for this key and dblclick on it
+        const nextCoords = await page.evaluate(`(() => {
+          const grids = [...document.querySelectorAll('.grid')].filter(el => el.offsetWidth > 0);
+          const grid = grids[grids.length - 1];
+          if (!grid) return null;
+          const head = grid.querySelector('.gridHead');
+          const body = grid.querySelector('.gridBody');
+          if (!head || !body) return null;
+          const headLine = head.querySelector('.gridLine') || head;
+          const cols = [];
+          [...headLine.children].forEach((box, i) => {
+            if (box.offsetWidth === 0) return;
+            const t = box.querySelector('.gridBoxText');
+            cols.push({ idx: i, text: ((t || box).innerText?.trim() || '').toLowerCase() });
+          });
+          const kl = ${JSON.stringify(key.toLowerCase())};
+          const klNoSpace = kl.replace(/\\s+/g, '');
+          let colIdx = -1;
+          const exact = cols.find(c => c.text === kl);
+          if (exact) colIdx = exact.idx;
+          else {
+            const inc = cols.find(c => c.text.includes(kl) || kl.includes(c.text)
+              || c.text.includes(klNoSpace) || klNoSpace.includes(c.text));
+            if (inc) colIdx = inc.idx;
+          }
+          if (colIdx < 0) return null;
+          const rows = [...body.querySelectorAll('.gridLine')];
+          if (${row} >= rows.length) return null;
+          const line = rows[${row}];
+          const boxes = [...line.children].filter(b => b.offsetWidth > 0 && !b.classList.contains('gridBoxComp'));
+          const box = boxes[colIdx];
+          if (!box) return null;
+          const cell = box.querySelector('.gridBoxText') || box;
+          const r = cell.getBoundingClientRect();
+          return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+        })()`);
+        if (!nextCoords) {
+          info.filled = true;
+          results.push({ field: key, error: 'column_not_found', message: `Column for "${key}" not found` });
+          continue;
+        }
+        await page.mouse.dblclick(nextCoords.x, nextCoords.y);
+        // Poll for selection form (with F4 fallback if dblclick didn't open it)
+        let selForm = null;
+        for (let attempt = 0; attempt < 2 && selForm === null; attempt++) {
+          if (attempt === 1) await page.keyboard.press('F4'); // F4 fallback
+          for (let sw = 0; sw < 6; sw++) {
+            await page.waitForTimeout(200);
+            selForm = await page.evaluate(`(() => {
+              const forms = {};
+              document.querySelectorAll('[id]').forEach(el => {
+                if (el.offsetWidth === 0 && el.offsetHeight === 0) return;
+                const m = el.id.match(/^form(\\d+)_/);
+                if (m) forms[m[1]] = true;
+              });
+              const nums = Object.keys(forms).map(Number).filter(n => n > ${formNum});
+              return nums.length > 0 ? Math.max(...nums) : null;
+            })()`);
+            if (selForm !== null) break;
+          }
+        }
+        if (selForm === null) {
+          info.filled = true;
+          results.push({ field: key, error: 'no_selection_form', message: `Dblclick on "${key}" did not open selection form` });
+          continue;
+        }
+        const pr = await directEditPick(selForm, key, info);
+        info.filled = true;
+        results.push(pr);
+      }
+      // Commit the edit: click on a different row (Escape cancels in tree grids).
+      // Find the first visible row that is NOT the edited row and click it.
+      const commitCoords = await page.evaluate(`(() => {
+        const grids = [...document.querySelectorAll('.grid')].filter(el => el.offsetWidth > 0);
+        const grid = grids[grids.length - 1];
+        if (!grid) return null;
+        const body = grid.querySelector('.gridBody');
+        if (!body) return null;
+        const rows = [...body.querySelectorAll('.gridLine')];
+        const otherIdx = ${row} === 0 ? 1 : 0;
+        const other = rows[otherIdx];
+        if (!other) return null;
+        const box = [...other.children].filter(b => b.offsetWidth > 0)[0];
+        if (!box) return null;
+        const r = box.getBoundingClientRect();
+        return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+      })()`);
+      if (commitCoords) {
+        await page.mouse.click(commitCoords.x, commitCoords.y);
+      } else {
+        await page.keyboard.press('Escape');
+      }
+      await waitForStable(formNum);
+      return results;
+    }
+
+    if (!inEdit) throw new Error(`fillTableRow: click on row ${row} did not enter edit mode`);
+  } else {
+    // No row specified — verify we're in grid edit mode (active INPUT inside a .grid or .gridContent)
+    const editCheck = await page.evaluate(`(() => {
+      const f = document.activeElement;
+      if (!f || f.tagName !== 'INPUT') return { inEdit: false, tag: f?.tagName };
+      let node = f;
+      while (node) {
+        if (node.classList?.contains('grid') || node.classList?.contains('gridContent')) return { inEdit: true };
+        node = node.parentElement;
+      }
+      return { inEdit: false, hint: 'input not inside grid' };
+    })()`);
+
+    if (!editCheck.inEdit) {
+      throw new Error('fillTableRow: not in grid edit mode. Use add:true or click a cell first.');
+    }
   }
 
   // 4. Prepare pending fields for fuzzy matching
@@ -2522,6 +2903,48 @@ export async function fillTableRow(fields, { tab, add, row } = {}) {
     // Tab already pressed — we're on next cell
   }
 
+  // Commit the new row: click on a different row or outside the grid.
+  // Without this, the row stays in "uncommitted add" state and a subsequent
+  // Escape (e.g. from closeForm) would cancel the entire row.
+  const commitTarget = await page.evaluate(`(() => {
+    // Find the active grid
+    const grids = [...document.querySelectorAll('.grid')].filter(el => el.offsetWidth > 0);
+    const grid = grids[grids.length - 1];
+    if (!grid) return null;
+    const body = grid.querySelector('.gridBody');
+    if (!body) return null;
+    const rows = [...body.querySelectorAll('.gridLine')];
+    // Find the currently active row (contains the focused input)
+    const activeInput = document.activeElement;
+    let activeRowIdx = -1;
+    if (activeInput) {
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i].contains(activeInput)) { activeRowIdx = i; break; }
+      }
+    }
+    // Click a DIFFERENT row to commit
+    const targetIdx = activeRowIdx === 0 ? 1 : 0;
+    const target = rows[targetIdx];
+    if (target) {
+      const box = [...target.children].find(b => b.offsetWidth > 0);
+      if (box) {
+        const r = box.getBoundingClientRect();
+        return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+      }
+    }
+    // Fallback: click the grid header
+    const head = grid.querySelector('.gridHead');
+    if (head) {
+      const r = head.getBoundingClientRect();
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+    }
+    return null;
+  })()`);
+  if (commitTarget) {
+    await page.mouse.click(commitTarget.x, commitTarget.y);
+    await page.waitForTimeout(500);
+  }
+
   // Dismiss any leftover error modals
   const err = await checkForErrors();
   if (err?.modal) {
@@ -2635,20 +3058,40 @@ export async function filterList(text, { field, exact } = {}) {
         .find(el => el.offsetWidth > 0 && /Строк[аи]Поиска|SearchString/i.test(el.id));
       return el ? el.id : null;
     })()`);
-    if (!searchId) throw new Error('filterList: no search input found on this form');
 
-    await page.click(`[id="${searchId}"]`);
-    await page.waitForTimeout(200);
-    await page.keyboard.press('Control+A');
-    await page.evaluate(`navigator.clipboard.writeText(${JSON.stringify(String(text))})`);
-    await page.keyboard.press('Control+V');
+    if (searchId) {
+      await page.click(`[id="${searchId}"]`);
+      await page.waitForTimeout(200);
+      await page.keyboard.press('Control+A');
+      await page.evaluate(`navigator.clipboard.writeText(${JSON.stringify(String(text))})`);
+      await page.keyboard.press('Control+V');
+      await page.waitForTimeout(300);
+      await page.keyboard.press('Enter');
+      await waitForStable(formNum);
+
+      const state = await getFormState();
+      state.filtered = { type: 'search', text };
+      return state;
+    }
+
+    // No search input — Ctrl+F opens advanced search on such forms.
+    // Click first grid cell then fall through to advanced search path below.
+    const firstCell = await page.evaluate(`(() => {
+      const p = 'form${formNum}_';
+      const grid = [...document.querySelectorAll('[id^="' + p + '"].grid, [id^="' + p + '"] .grid')]
+        .find(g => g.offsetWidth > 0);
+      if (!grid) return null;
+      const rows = [...grid.querySelectorAll('.gridBody .gridLine')];
+      if (!rows.length) return null;
+      const cells = [...rows[0].querySelectorAll('.gridBox')];
+      if (!cells.length) return null;
+      const r = cells[0].getBoundingClientRect();
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+    })()`);
+    if (!firstCell) throw new Error('filterList: no search input and no grid found on this form');
+    await page.mouse.click(firstCell.x, firstCell.y);
     await page.waitForTimeout(300);
-    await page.keyboard.press('Enter');
-    await waitForStable(formNum);
-
-    const state = await getFormState();
-    state.filtered = { type: 'search', text };
-    return state;
+    field = ''; // fall through to advanced search, skip DLB (empty field = keep auto-selected)
   }
 
   // --- Advanced search: click target column cell → Alt+F → fill Pattern → Найти ---
@@ -2724,7 +3167,8 @@ export async function filterList(text, { field, exact } = {}) {
   }
 
   // 2b. If column wasn't in the grid, change FieldSelector via DLB dropdown
-  if (needDlb) {
+  //     Skip DLB when field is empty (fallback from no-search-input path — keep auto-selected field)
+  if (needDlb && field) {
     const fsInfo = await page.evaluate(`(() => {
       const p = 'form' + ${JSON.stringify(String(dialogForm))} + '_';
       const fsInput = [...document.querySelectorAll('input.editInput[id^="' + p + '"]')]
