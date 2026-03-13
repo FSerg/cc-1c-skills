@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# db-load-git v1.0 — Load Git changes into 1C database
+# db-load-git v1.1 — Load Git changes into 1C database
 # Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 
 import argparse
@@ -119,18 +119,18 @@ def main():
 
     if args.Source == "Staged":
         print("Getting staged changes...")
-        changed_files += run_git(args.ConfigDir, ["diff", "--cached", "--name-only"])
+        changed_files += run_git(args.ConfigDir, ["diff", "--cached", "--name-only", "--relative"])
     elif args.Source == "Unstaged":
         print("Getting unstaged changes...")
-        changed_files += run_git(args.ConfigDir, ["diff", "--name-only"])
+        changed_files += run_git(args.ConfigDir, ["diff", "--name-only", "--relative"])
         changed_files += run_git(args.ConfigDir, ["ls-files", "--others", "--exclude-standard"])
     elif args.Source == "Commit":
         print(f"Getting changes from {args.CommitRange}...")
-        changed_files += run_git(args.ConfigDir, ["diff", "--name-only", args.CommitRange])
+        changed_files += run_git(args.ConfigDir, ["diff", "--name-only", "--relative", args.CommitRange])
     elif args.Source == "All":
         print("Getting all uncommitted changes...")
-        changed_files += run_git(args.ConfigDir, ["diff", "--cached", "--name-only"])
-        changed_files += run_git(args.ConfigDir, ["diff", "--name-only"])
+        changed_files += run_git(args.ConfigDir, ["diff", "--cached", "--name-only", "--relative"])
+        changed_files += run_git(args.ConfigDir, ["diff", "--name-only", "--relative"])
         changed_files += run_git(args.ConfigDir, ["ls-files", "--others", "--exclude-standard"])
 
     # Deduplicate and filter blanks
