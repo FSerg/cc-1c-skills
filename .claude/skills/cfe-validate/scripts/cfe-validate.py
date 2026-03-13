@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# cfe-validate v1.2 — Validate 1C configuration extension XML structure (CFE)
+# cfe-validate v1.3 — Validate 1C configuration extension XML structure (CFE)
 # Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 """Validates extension Configuration.xml: root, InternalInfo, extension properties, ChildObjects, borrowed objects."""
 import sys, os, argparse, re
@@ -535,6 +535,17 @@ def main():
     enum_values_index = {}
     form_list = []
 
+    def is_borrowed_sub_item(sub_item):
+        """Check if sub-item has explicit borrowed metadata (ObjectBelonging or ExtendedConfigurationObject)."""
+        sub_props = sub_item.find(f'{{{MD}}}Properties')
+        if sub_props is None:
+            return False
+        sub_ob = sub_props.find(f'{{{MD}}}ObjectBelonging')
+        if sub_ob is not None and (sub_ob.text or ''):
+            return True
+        sub_ext = sub_props.find(f'{{{MD}}}ExtendedConfigurationObject')
+        return sub_ext is not None and bool(sub_ext.text or '')
+
     def validate_borrowed_sub_item(check_num, context, sub_type, sub_item):
         """Validate a borrowed Attribute/EnumValue/TabularSection sub-item."""
         sub_props = sub_item.find(f'{{{MD}}}Properties')
@@ -631,11 +642,15 @@ def main():
                     sub_type = etree.QName(sub_item.tag).localname
 
                     if sub_type == 'Attribute':
+                        if not is_borrowed_sub_item(sub_item):
+                            continue
                         sub_item_count += 1
                         if not validate_borrowed_sub_item('10', ctx, 'Attribute', sub_item):
                             check10_ok = False
 
                     elif sub_type == 'TabularSection':
+                        if not is_borrowed_sub_item(sub_item):
+                            continue
                         sub_item_count += 1
                         if not validate_borrowed_sub_item('10', ctx, 'TabularSection', sub_item):
                             check10_ok = False
@@ -662,11 +677,15 @@ def main():
                                         continue
                                     if etree.QName(ts_attr.tag).localname != 'Attribute':
                                         continue
+                                    if not is_borrowed_sub_item(ts_attr):
+                                        continue
                                     sub_item_count += 1
                                     if not validate_borrowed_sub_item('10', f'{ctx}.ТЧ.{ts_label}', 'Attribute', ts_attr):
                                         check10_ok = False
 
                     elif sub_type == 'EnumValue' and type_name == 'Enum':
+                        if not is_borrowed_sub_item(sub_item):
+                            continue
                         sub_item_count += 1
                         if validate_borrowed_sub_item('10', ctx, 'EnumValue', sub_item):
                             ev_name = sub_item.find(f'{{{MD}}}Properties/{{{MD}}}Name')

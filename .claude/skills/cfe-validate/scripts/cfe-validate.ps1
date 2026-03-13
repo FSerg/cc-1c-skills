@@ -1,4 +1,4 @@
-﻿# cfe-validate v1.2 — Validate 1C configuration extension structure (CFE)
+﻿# cfe-validate v1.3 — Validate 1C configuration extension structure (CFE)
 # Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 param(
 	[Parameter(Mandatory)]
@@ -537,6 +537,17 @@ if ($script:stopped) { & $finalize; exit 1 }
 $script:enumValuesIndex = @{}
 $script:formList = @()
 
+# Helper: check if sub-item has explicit borrowed metadata
+function Test-BorrowedSubItem {
+	param($subItem, $nsm)
+	$subProps = $subItem.SelectSingleNode("md:Properties", $nsm)
+	if (-not $subProps) { return $false }
+	$subOb = $subProps.SelectSingleNode("md:ObjectBelonging", $nsm)
+	if ($subOb -and $subOb.InnerText) { return $true }
+	$subExt = $subProps.SelectSingleNode("md:ExtendedConfigurationObject", $nsm)
+	return [bool]($subExt -and $subExt.InnerText)
+}
+
 # Helper: validate a borrowed Attribute/EnumValue sub-item
 function Validate-BorrowedSubItem {
 	param([string]$checkNum, [string]$context, [string]$subType, $subItem, $nsm)
@@ -638,12 +649,14 @@ if ($childObjNode) {
 				$subType = $subItem.LocalName
 
 				if ($subType -eq "Attribute") {
+					if (-not (Test-BorrowedSubItem $subItem $objNs)) { continue }
 					$subItemCount++
 					if (-not (Validate-BorrowedSubItem "10" $ctx "Attribute" $subItem $objNs)) {
 						$check10Ok = $false
 					}
 				}
 				elseif ($subType -eq "TabularSection") {
+					if (-not (Test-BorrowedSubItem $subItem $objNs)) { continue }
 					$subItemCount++
 					if (-not (Validate-BorrowedSubItem "10" $ctx "TabularSection" $subItem $objNs)) {
 						$check10Ok = $false
@@ -673,6 +686,7 @@ if ($childObjNode) {
 						if ($tsChildObjs) {
 							foreach ($tsAttr in $tsChildObjs.ChildNodes) {
 								if ($tsAttr.NodeType -ne 'Element' -or $tsAttr.LocalName -ne "Attribute") { continue }
+								if (-not (Test-BorrowedSubItem $tsAttr $objNs)) { continue }
 								$subItemCount++
 								if (-not (Validate-BorrowedSubItem "10" "${ctx}.ТЧ.${tsLabel}" "Attribute" $tsAttr $objNs)) {
 									$check10Ok = $false
@@ -682,6 +696,7 @@ if ($childObjNode) {
 					}
 				}
 				elseif ($subType -eq "EnumValue" -and $typeName -eq "Enum") {
+					if (-not (Test-BorrowedSubItem $subItem $objNs)) { continue }
 					$subItemCount++
 					if (Validate-BorrowedSubItem "10" $ctx "EnumValue" $subItem $objNs) {
 						$evName = $subItem.SelectSingleNode("md:Properties/md:Name", $objNs)
