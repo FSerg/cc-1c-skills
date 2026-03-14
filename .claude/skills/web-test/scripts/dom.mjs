@@ -654,16 +654,16 @@ export function findClickTargetScript(formNum, text, { tableName, gridSelector }
         // Try fuzzy match within container first
         let cf = containerItems.find(i => i.name.toLowerCase() === target);
         if (!cf) cf = containerItems.find(i => i.label && i.label.toLowerCase() === target);
-        if (!cf) cf = containerItems.find(i => i.name.toLowerCase().includes(target));
-        if (!cf) cf = containerItems.find(i => i.label && i.label.toLowerCase().includes(target));
+        if (!cf && target.length >= 4) cf = containerItems.find(i => i.name.toLowerCase().includes(target));
+        if (!cf && target.length >= 4) cf = containerItems.find(i => i.label && i.label.toLowerCase().includes(target));
         if (cf) return { id: cf.id, kind: cf.kind, name: cf.name };
         // Fallback: filter by gridName id-prefix (e.g. ИсходящиеКоманднаяПанель_Добавить)
         const gridName = gridEl.id ? gridEl.id.replace(p, '') : '';
         if (gridName) {
           const prefixItems = items.filter(i => i.label && i.label.includes(gridName));
           let pf = prefixItems.find(i => i.name.toLowerCase() === target);
-          if (!pf) pf = prefixItems.find(i => i.label && i.label.toLowerCase().includes(target));
-          if (!pf) pf = prefixItems.find(i => i.name.toLowerCase().includes(target));
+          if (!pf && target.length >= 4) pf = prefixItems.find(i => i.label && i.label.toLowerCase().includes(target));
+          if (!pf && target.length >= 4) pf = prefixItems.find(i => i.name.toLowerCase().includes(target));
           if (pf) return { id: pf.id, kind: pf.kind, name: pf.name };
         }
       }
@@ -671,12 +671,14 @@ export function findClickTargetScript(formNum, text, { tableName, gridSelector }
     }
 
     // Fuzzy match: exact name -> exact label -> startsWith name -> startsWith label -> includes name -> includes label
+    // Skip includes() for short strings (< 4 chars) to avoid false positives
+    // e.g. "Да" matching "КомандаУстановитьВсе"
     let found = items.find(i => i.name.toLowerCase() === target);
     if (!found) found = items.find(i => i.label && i.label.toLowerCase() === target);
     if (!found) found = items.find(i => i.name.toLowerCase().startsWith(target));
     if (!found) found = items.find(i => i.label && i.label.toLowerCase().startsWith(target));
-    if (!found) found = items.find(i => i.name.toLowerCase().includes(target));
-    if (!found) found = items.find(i => i.label && i.label.toLowerCase().includes(target));
+    if (!found && target.length >= 4) found = items.find(i => i.name.toLowerCase().includes(target));
+    if (!found && target.length >= 4) found = items.find(i => i.label && i.label.toLowerCase().includes(target));
 
     if (found) {
       return { id: found.id, kind: found.kind, name: found.name };
@@ -693,7 +695,7 @@ export function findClickTargetScript(formNum, text, { tableName, gridSelector }
           const rowTexts = textBoxes.map(b => b.innerText?.trim() || '').filter(Boolean);
           const firstCell = rowTexts[0]?.toLowerCase() || '';
           const rowText = rowTexts.join(' ').toLowerCase();
-          if (firstCell === target || rowText === target || firstCell.includes(target) || rowText.includes(target)) {
+          if (firstCell === target || rowText === target || (target.length >= 4 && (firstCell.includes(target) || rowText.includes(target)))) {
             const imgBox = line.querySelector('.gridBoxImg');
             const isGroup = imgBox?.querySelector('.gridListH') !== null;
             const isParent = imgBox?.querySelector('.gridListV') !== null;

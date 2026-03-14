@@ -4075,10 +4075,12 @@ export async function highlight(text, opts = {}) {
           return { id: el.id, name, label };
         });
         // Fuzzy match: exact label → exact name → startsWith → includes
+        // Skip includes() for short strings (< 4 chars) to avoid false positives
+        // e.g. "Да" matching "Удаляемые"
         let found = items.find(i => i.label === target);
         if (!found) found = items.find(i => i.name === target);
         if (!found) found = items.find(i => i.label.startsWith(target) || i.name.startsWith(target));
-        if (!found) found = items.find(i => i.label.includes(target) || i.name.includes(target));
+        if (!found && target.length >= 4) found = items.find(i => i.label.includes(target) || i.name.includes(target));
         return found ? found.id : null;
       })()`);
     }
