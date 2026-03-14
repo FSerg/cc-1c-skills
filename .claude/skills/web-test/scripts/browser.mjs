@@ -2958,38 +2958,15 @@ export async function fillTableRow(fields, { tab, add, row, table } = {}) {
     // Tab already pressed — we're on next cell
   }
 
-  // Commit the new row: click on a different row or outside the grid.
-  // Without this, the row stays in "uncommitted add" state and a subsequent
-  // Escape (e.g. from closeForm) would cancel the entire row.
+  // Commit the new row: click on the grid header to exit edit mode.
+  // Clicking a different data row would re-enter edit mode on that row.
+  // Without this commit click, the row stays in "uncommitted add" state
+  // and a subsequent Escape (e.g. from closeForm) would cancel the entire row.
   const commitTarget = await page.evaluate(`(() => {
-    // Find the active grid
     const grid = ${gridSelector
       ? `document.querySelector(${JSON.stringify(gridSelector)})`
       : `(() => { const grids = [...document.querySelectorAll('.grid')].filter(el => el.offsetWidth > 0); return grids[grids.length - 1]; })()`};
     if (!grid) return null;
-    const body = grid.querySelector('.gridBody');
-    if (!body) return null;
-    const rows = [...body.querySelectorAll('.gridLine')];
-    // Find the currently active row (contains the focused input)
-    const activeInput = document.activeElement;
-    let activeRowIdx = -1;
-    if (activeInput) {
-      for (let i = 0; i < rows.length; i++) {
-        if (rows[i].contains(activeInput)) { activeRowIdx = i; break; }
-      }
-    }
-    // Click a DIFFERENT row to commit
-    const targetIdx = activeRowIdx === 0 ? 1 : 0;
-    const target = rows[targetIdx];
-    if (target) {
-      const visBoxes = [...target.children].filter(b => b.offsetWidth > 0 && !b.classList.contains('gridBoxComp'));
-      const box = visBoxes.length > 1 ? visBoxes[1] : visBoxes[0];
-      if (box) {
-        const r = box.getBoundingClientRect();
-        return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
-      }
-    }
-    // Fallback: click the grid header
     const head = grid.querySelector('.gridHead');
     if (head) {
       const r = head.getBoundingClientRect();
@@ -2999,6 +2976,10 @@ export async function fillTableRow(fields, { tab, add, row, table } = {}) {
   })()`);
   if (commitTarget) {
     await page.mouse.click(commitTarget.x, commitTarget.y);
+    await page.waitForTimeout(500);
+  } else {
+    // Fallback: Tab out of the last cell to commit the row
+    await page.keyboard.press('Tab');
     await page.waitForTimeout(500);
   }
 
