@@ -118,10 +118,13 @@ async function executeScript(code, { noRecord } = {}) {
     exports.writeFileSync = writeFileSync;
     exports.readFileSync = readFileSync;
 
-    // --no-record: stub all recording/narration functions as no-ops
+    // --no-record: stub recording/narration functions to return safe defaults
     if (noRecord) {
       const noop = async () => {};
-      for (const fn of ['startRecording', 'stopRecording', 'addNarration', 'showCaption', 'hideCaption', 'showTitleSlide', 'hideTitleSlide']) {
+      exports.startRecording = noop;
+      exports.stopRecording = async () => ({ file: null, duration: 0, size: 0 });
+      exports.addNarration = async () => ({ file: null, duration: 0, size: 0, captions: 0 });
+      for (const fn of ['showCaption', 'hideCaption', 'showTitleSlide', 'hideTitleSlide']) {
         exports[fn] = noop;
       }
       exports.isRecording = () => false;
