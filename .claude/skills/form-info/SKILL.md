@@ -23,6 +23,7 @@ allowed-tools:
 | Параметр  | Обязательный | По умолчанию | Описание                                    |
 |-----------|:------------:|--------------|---------------------------------------------|
 | FormPath  | да           | —            | Путь к файлу Form.xml                       |
+| Expand    | нет          | —            | Раскрыть свёрнутую секцию по имени, `*` — все |
 | Limit     | нет          | `150`        | Макс. строк вывода (защита от переполнения) |
 | Offset    | нет          | `0`          | Пропустить N строк (для пагинации)          |
 
@@ -30,6 +31,16 @@ allowed-tools:
 
 ```powershell
 powershell.exe -NoProfile -File .claude/skills/form-info/scripts/form-info.ps1 -FormPath "<путь к Form.xml>"
+```
+
+Раскрыть содержимое страницы:
+```powershell
+powershell.exe -NoProfile -File .claude/skills/form-info/scripts/form-info.ps1 -FormPath "<путь>" -Expand "Основное"
+```
+
+Раскрыть все свёрнутые секции:
+```powershell
+powershell.exe -NoProfile -File .claude/skills/form-info/scripts/form-info.ps1 -FormPath "<путь>" -Expand "*"
 ```
 
 С пагинацией:
@@ -112,7 +123,7 @@ Elements:
 | `[Button]` | Button |
 | `[CmdBar]` | CommandBar |
 | `[Pages]` | Pages |
-| `[Page]` | Page (показывает кол-во элементов вместо раскрытия) |
+| `[Page]` | Page (свёрнут — показывает кол-во элементов; раскрывается через `-Expand`) |
 | `[Popup]` | Popup |
 | `[BtnGroup]` | ButtonGroup |
 
