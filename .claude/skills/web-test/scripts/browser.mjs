@@ -1,4 +1,4 @@
-// web-test browser v1.2 — Playwright browser management for 1C web client
+// web-test browser v1.3 — Playwright browser management for 1C web client
 // Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 /**
  * Playwright browser management for 1C web client.
@@ -4074,8 +4074,8 @@ export async function highlight(text, opts = {}) {
 
   // 2. Form groups/panels — checked BEFORE buttons/fields because group names
   //    often collide with command bar buttons (e.g. "БизнесПроцессы" is both a
-  //    panel and a command bar element). Min-area filter (100x50) only for fuzzy
-  //    match — exact match by name works regardless of size (Representation=None).
+  //    panel and a command bar element). Includes _container and _div elements
+  //    but skips logicGroupContainer (Representation=None, height=0).
   if (!elId) {
     const formNum = await page.evaluate(detectFormScript());
     if (formNum !== null) {
@@ -4083,12 +4083,11 @@ export async function highlight(text, opts = {}) {
         const norm = s => (s?.trim().replace(/\\u00a0/g, ' ') || '').replace(/ё/gi, 'е');
         const target = ${JSON.stringify(normYo(text.toLowerCase()))};
         const p = 'form' + ${formNum} + '_';
-        // Collect ALL visible group containers — _container or _div elements
+        // Group containers: _container or _div, but skip logicGroupContainer (invisible groups)
         const groups = [...document.querySelectorAll('[id^="' + p + '"][id$="_container"], [id^="' + p + '"][id$="_div"]')]
-          .filter(el => el.offsetWidth > 0);
+          .filter(el => el.offsetWidth > 0 && el.offsetHeight > 0 && !el.classList.contains('logicGroupContainer'));
         const items = groups.map(el => {
           const idName = el.id.replace(p, '').replace(/_(container|div)$/, '');
-          // Try to find a visible title/label for this group
           const titleEl = document.getElementById(p + idName + '#title_text')
             || document.getElementById(p + idName + '_title_text');
           const label = norm(titleEl?.innerText || '').toLowerCase();
@@ -4096,7 +4095,6 @@ export async function highlight(text, opts = {}) {
           const big = el.offsetWidth >= 100 && el.offsetHeight >= 50;
           return { id: el.id, name, label, big };
         });
-        // Exact match: no size filter (supports Representation=None groups)
         let found = items.find(i => i.label === target);
         if (!found) found = items.find(i => i.name === target);
         // Fuzzy match: only large groups (min 100x50) to avoid matching command bars
@@ -4194,9 +4192,9 @@ export async function highlight(text, opts = {}) {
         }
         if (formNum !== null) {
           const p = 'form' + formNum + '_';
-          // Groups
+          // Groups (_container or _div, skip logicGroupContainer, min 100x50)
           const groups = [...document.querySelectorAll('[id^="' + p + '"][id$="_container"], [id^="' + p + '"][id$="_div"]')]
-            .filter(el => el.offsetWidth > 0)
+            .filter(el => el.offsetWidth >= 100 && el.offsetHeight >= 50 && !el.classList.contains('logicGroupContainer'))
             .map(el => {
               const idName = el.id.replace(p, '').replace(/_(container|div)$/, '');
               const titleEl = document.getElementById(p + idName + '#title_text') || document.getElementById(p + idName + '_title_text');
