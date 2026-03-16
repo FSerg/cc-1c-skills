@@ -2110,7 +2110,16 @@ export async function fillTableRow(fields, { tab, add, row, table } = {}) {
   }
 
   // 2. Add new row if requested
+  let addedRowIdx = -1;
   if (add) {
+    // Count rows before add — new row will be appended at this index
+    addedRowIdx = await page.evaluate(`(() => {
+      const grid = ${gridSelector
+        ? `document.querySelector(${JSON.stringify(gridSelector)})`
+        : `(() => { const grids = [...document.querySelectorAll('.grid')].filter(el => el.offsetWidth > 0); return grids[grids.length - 1]; })()`};
+      const body = grid?.querySelector('.gridBody');
+      return body ? body.querySelectorAll('.gridLine').length : 0;
+    })()`);
     await clickElement('Добавить', { table });
     // Poll for edit mode (INPUT inside grid) instead of fixed 1000ms wait
     for (let aw = 0; aw < 6; aw++) {
@@ -2206,6 +2215,13 @@ export async function fillTableRow(fields, { tab, add, row, table } = {}) {
       }
       const results = [{ field: firstKey0, ok: true, method: 'toggle', value: desired }];
       await waitForStable(formNum);
+      // If more fields remain, process them on the same row
+      const remaining = { ...fields };
+      delete remaining[firstKey0];
+      if (Object.keys(remaining).length > 0) {
+        const more = await fillTableRow(remaining, { row, table });
+        results.push(...more);
+      }
       return results;
     }
 
@@ -2521,7 +2537,10 @@ export async function fillTableRow(fields, { tab, add, row, table } = {}) {
     if (cell.tag !== 'INPUT' || !cell.fullName) {
       // Not in an editable grid cell — Tab past (ERP has DIV focus between cells)
       nonInputCount++;
-      if (nonInputCount > 3) break; // truly exited edit mode
+      // If only checkbox fields remain unfilled, stop Tab'ing to avoid creating extra rows
+      const onlyCheckboxLeft = [...pending.values()].every(p => p.filled ||
+        ['true', 'false', 'да', 'нет', '1', '0', 'yes', 'no'].includes(p.value.toLowerCase().trim()));
+      if (nonInputCount > 3 || onlyCheckboxLeft) break;
       await page.keyboard.press('Tab');
       await page.waitForTimeout(300);
       continue;
@@ -3029,6 +3048,45 @@ export async function fillTableRow(fields, { tab, add, row, table } = {}) {
   }
 
   const notFilled = [...pending].filter(([_, info]) => !info.filled).map(([key]) => key);
+
+  // Retry unfilled checkbox fields via direct click (Tab skips checkbox cells)
+  if (notFilled.length > 0) {
+    const checkboxFields = {};
+    for (const key of notFilled) {
+      const val = String(pending.get(key).value).toLowerCase().trim();
+      if (['true', 'false', 'да', 'нет', '1', '0', 'yes', 'no'].includes(val)) {
+        checkboxFields[key] = pending.get(key).value;
+      }
+    }
+    if (Object.keys(checkboxFields).length > 0) {
+      // Use row index: addedRowIdx (from add mode) or fallback to selected row
+      const currentRow = addedRowIdx >= 0 ? addedRowIdx : (row != null ? row : await page.evaluate(`(() => {
+        const grid = ${gridSelector
+          ? `document.querySelector(${JSON.stringify(gridSelector)})`
+          : `(() => { const grids = [...document.querySelectorAll('.grid')].filter(el => el.offsetWidth > 0); return grids[grids.length - 1]; })()`};
+        if (!grid) return -1;
+        const body = grid.querySelector('.gridBody');
+        if (!body) return -1;
+        const lines = [...body.querySelectorAll('.gridLine')];
+        const sel = lines.findIndex(l => l.classList.contains('selected'));
+        return sel >= 0 ? sel : lines.length - 1;
+      })()`)
+      );
+      if (currentRow >= 0) {
+        const more = await fillTableRow(checkboxFields, { row: currentRow, table });
+        if (Array.isArray(more)) {
+          results.push(...more);
+        } else if (more?.filled) {
+          results.push(...more.filled);
+        }
+        for (const key of Object.keys(checkboxFields)) {
+          const idx = notFilled.indexOf(key);
+          if (idx >= 0) notFilled.splice(idx, 1);
+        }
+      }
+    }
+  }
+
   const formData = await getFormState();
   const result = { filled: results };
   if (notFilled.length > 0) result.notFilled = notFilled;

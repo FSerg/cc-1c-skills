@@ -200,7 +200,20 @@ const READ_FORM_FN = `function readForm(p) {
           if (box.offsetWidth === 0) return;
           const textEl = box.querySelector('.gridBoxText');
           const text = (textEl || box).innerText?.trim().replace(/\\n/g, ' ') || '';
-          if (text) columns.push(text);
+          if (text) {
+            columns.push(text);
+          } else {
+            // Unnamed column — check if data cells contain checkboxes
+            const firstLine = body?.querySelector('.gridLine');
+            if (firstLine) {
+              const visibleHeaders = [...headLine.children].filter(c => c.offsetWidth > 0);
+              const idx = visibleHeaders.indexOf(box);
+              const cells = [...firstLine.children].filter(c => c.offsetWidth > 0);
+              if (cells[idx]?.querySelector('.checkbox')) {
+                columns.push('(checkbox)');
+              }
+            }
+          }
         });
       }
       const rowCount = body ? body.querySelectorAll('.gridLine').length : 0;
@@ -483,7 +496,20 @@ export function readTableScript(formNum, { maxRows = 20, offset = 0, gridSelecto
       if (box.offsetWidth === 0) return;
       const textEl = box.querySelector('.gridBoxText');
       const text = (textEl || box).innerText?.trim().replace(/\\n/g, ' ') || '';
-      if (!text) return;
+      if (!text) {
+        // Unnamed column — check if data cells contain checkboxes
+        const firstLine = body?.querySelector('.gridLine');
+        if (firstLine) {
+          const visibleHeaders = [...headLine.children].filter(c => c.offsetWidth > 0);
+          const idx = visibleHeaders.indexOf(box);
+          const cells = [...firstLine.children].filter(c => c.offsetWidth > 0);
+          if (cells[idx]?.querySelector('.checkbox')) {
+            const r = box.getBoundingClientRect();
+            columns.push({ text: '(checkbox)', x: r.x, w: r.width, right: r.x + r.width });
+          }
+        }
+        return;
+      }
       const r = box.getBoundingClientRect();
       columns.push({ text, x: r.x, w: r.width, right: r.x + r.width });
     });
@@ -501,8 +527,14 @@ export function readTableScript(formNum, { maxRows = 20, offset = 0, gridSelecto
       [...line.children].forEach(box => {
         if (box.offsetWidth === 0) return;
         const textEl = box.querySelector('.gridBoxText');
-        const val = (textEl || box).innerText?.trim().replace(/\\n/g, ' ') || '';
-        if (!val) return;
+        const chk = box.querySelector('.checkbox');
+        let val;
+        if (chk) {
+          val = chk.classList.contains('select') ? 'true' : 'false';
+        } else {
+          val = (textEl || box).innerText?.trim().replace(/\\n/g, ' ') || '';
+          if (!val) return;
+        }
         // Match cell to column by X-coordinate overlap
         const r = box.getBoundingClientRect();
         const cx = r.x + r.width / 2;
