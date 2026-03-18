@@ -88,6 +88,7 @@ Display a text overlay on the page (visible in recording). Calling again updates
 | `opts.fontSize` | number | 24 | Font size in px |
 | `opts.background` | string | `'rgba(0,0,0,0.7)'` | Background color |
 | `opts.color` | string | `'#fff'` | Text color |
+| `opts.speech` | string \| false | - | TTS narration text. Omit = use displayed text, string = custom narration, false = skip narration |
 
 The overlay uses `pointer-events: none` — does not interfere with clicking.
 
