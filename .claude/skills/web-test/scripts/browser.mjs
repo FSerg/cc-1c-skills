@@ -360,6 +360,35 @@ async function dismissPendingErrors() {
 }
 
 /**
+ * Detect open platform-level dialogs (About, Support Info, Error Report).
+ * Returns array of { type, title? } for each detected dialog, or empty array.
+ */
+async function _detectPlatformDialogs() {
+  return await page.evaluate(() => {
+    const result = [];
+    // "О программе" dialog
+    const about = document.getElementById('aboutContainer');
+    if (about && about.offsetWidth > 0) result.push({ type: 'about', title: 'О программе' });
+    // "Информация для технической поддержки" (inside a ps*win with errJournalInput)
+    const errJ = document.getElementById('errJournalInput');
+    if (errJ && errJ.offsetWidth > 0) result.push({ type: 'supportInfo', title: 'Информация для технической поддержки' });
+    // "Отчет об ошибке" / "Подробный текст ошибки" — ps*win cloud windows without aboutContainer
+    if (!result.length) {
+      document.querySelectorAll('[id^="ps"][id$="win"]').forEach(w => {
+        if (w.offsetWidth === 0 || w.offsetHeight === 0) return;
+        // Skip the main app window (ps*win that contains the 1C forms)
+        if (w.querySelector('[id^="form"][id$="_container"]')) return;
+        // Check title text
+        const titleEl = w.querySelector('[id$="headerTopLine_cmd_Title"]');
+        const title = titleEl?.textContent?.trim() || '';
+        if (title) result.push({ type: 'platformWindow', title });
+      });
+    }
+    return result;
+  });
+}
+
+/**
  * Close any platform-level dialogs that may be left open (about, support info, error report).
  * These are NOT 1C forms — they are platform UI overlays invisible to getFormState().
  * Each close is wrapped in try/catch to avoid cascading failures.
@@ -852,6 +881,10 @@ export async function getFormState() {
       state.hint = 'Call web_click with a button name (e.g. "Да", "Нет", "Отмена") to respond';
     }
   }
+  // Detect platform-level dialogs (About, Support Info, Error Report)
+  // These are NOT 1C forms — invisible to detectForms() and not closeable via Escape.
+  const pd = await _detectPlatformDialogs();
+  if (pd.length) state.platformDialogs = pd;
   return state;
 }
 
@@ -2124,6 +2157,16 @@ export async function clickElement(text, { dblclick, table, toggle, expand } = {
 export async function closeForm({ save } = {}) {
   ensureConnected();
   await dismissPendingErrors();
+  // If platform dialogs are open, close them instead of pressing Escape
+  const pd = await _detectPlatformDialogs();
+  if (pd.length) {
+    await _closePlatformDialogs();
+    await page.waitForTimeout(300);
+    const state = await getFormState();
+    state.closed = true;
+    state.closedPlatformDialogs = pd;
+    return state;
+  }
   const beforeForm = await page.evaluate(detectFormScript());
   await page.keyboard.press('Escape');
   await waitForStable(beforeForm);
