@@ -1,4 +1,4 @@
-// web-test dom v1.1 — DOM selectors and semantic mapping for 1C web client
+// web-test dom v1.2 — DOM selectors and semantic mapping for 1C web client
 // Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 /**
  * DOM selectors and semantic mapping for 1C:Enterprise web client.
@@ -30,6 +30,21 @@ const DETECT_FORM_FN = `function detectForm() {
     if (counts[maxForm] >= 1) return maxForm;
   }
   return candidates.reduce((best, n) => counts[n] > counts[best] ? n : best);
+}`;
+
+/** Detect all open forms + modal state. Returns { activeForm, allForms, formCount, modal }.
+ *  Works even when the open-windows tab bar is hidden. */
+const DETECT_FORMS_FN = `function detectForms() {
+  const counts = {};
+  document.querySelectorAll('input.editInput[id], a.press[id]').forEach(el => {
+    if (el.offsetWidth === 0) return;
+    const m = el.id.match(/^form(\\d+)_/);
+    if (m) counts[m[1]] = (counts[m[1]] || 0) + 1;
+  });
+  const nums = Object.keys(counts).map(Number);
+  const modal = document.getElementById('modalSurface');
+  const isModal = !!(modal && modal.offsetWidth > 0);
+  return { allForms: nums.sort((a, b) => a - b), formCount: nums.length, modal: isModal };
 }`;
 
 /** Read form state given prefix p. Returns { fields, buttons, tabs, texts, hyperlinks, table, iframes }. */
@@ -586,12 +601,14 @@ export function readTableScript(formNum, { maxRows = 20, offset = 0, gridSelecto
 export function getFormStateScript() {
   return `(() => {
     ${DETECT_FORM_FN}
+    ${DETECT_FORMS_FN}
     ${READ_FORM_FN}
     const formNum = detectForm();
-    if (formNum === null) return { form: null, message: 'No form detected' };
+    const meta = detectForms();
+    if (formNum === null) return { form: null, formCount: 0, message: 'No form detected' };
     const p = 'form' + formNum + '_';
     const formData = readForm(p);
-    // Open tabs bar
+    // Open tabs bar (present only when tab panel is enabled in 1C settings)
     const openTabs = [];
     document.querySelectorAll('[id^="openedCell_cmd_"]').forEach(el => {
       const text = el.innerText?.trim();
@@ -601,7 +618,10 @@ export function getFormStateScript() {
       openTabs.push(entry);
     });
     const activeTab = openTabs.find(t => t.active)?.name || null;
-    return { form: formNum, activeTab, ...formData };
+    const result = { form: formNum, activeTab, openForms: meta.allForms, formCount: meta.formCount, ...formData };
+    if (meta.modal) result.modal = true;
+    if (openTabs.length) result.openTabs = openTabs;
+    return result;
   })()`;
 }
 

@@ -1,4 +1,4 @@
-// web-test browser v1.4 — Playwright browser management for 1C web client
+// web-test browser v1.5 — Playwright browser management for 1C web client
 // Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 /**
  * Playwright browser management for 1C web client.
@@ -1893,8 +1893,9 @@ export async function clickElement(text, { dblclick, table, toggle, expand } = {
 export async function closeForm({ save } = {}) {
   ensureConnected();
   await dismissPendingErrors();
+  const beforeForm = await page.evaluate(detectFormScript());
   await page.keyboard.press('Escape');
-  await waitForStable();
+  await waitForStable(beforeForm);
   const state = await getFormState();
   const err = await checkForErrors();
   if (err?.confirmation) {
@@ -1906,15 +1907,19 @@ export async function closeForm({ save } = {}) {
         const txt = (await b.textContent()).trim();
         if (txt === label) {
           await b.click({ force: true });
-          await waitForStable();
+          await waitForStable(beforeForm);
           break;
         }
       }
-      return await getFormState();
+      const afterState = await getFormState();
+      afterState.closed = afterState.form !== beforeForm;
+      return afterState;
     }
     state.confirmation = err.confirmation;
     state.hint = 'Confirmation dialog shown. Click "Да" to confirm or "Нет" to cancel';
+    return state;
   }
+  state.closed = state.form !== beforeForm;
   return state;
 }
 

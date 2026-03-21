@@ -205,7 +205,7 @@ await closeForm({ save: false });
 
 | Функция | Описание | Возвращает |
 |---------|----------|------------|
-| `getFormState()` | Структура формы: поля, кнопки, таблица, фильтры | `{ fields, buttons, tabs, table, filters, reportSettings? }` |
+| `getFormState()` | Структура формы: поля, кнопки, таблица, фильтры, состояние окон | `{ form, formCount, openForms, fields, buttons, tabs, table, filters, reportSettings? }` |
 | `readTable({ maxRows?, offset? })` | Данные таблицы с пагинацией | `{ columns, rows: [{col: val}], total }` |
 | `readSpreadsheet()` | Результат отчёта | `{ title?, headers?, data?, totals?, total }` |
 | `getSections()` | Разделы и команды | `{ activeSection, sections, commands }` |
@@ -215,6 +215,11 @@ await closeForm({ save: false });
 
 Основной способ «увидеть» что на экране:
 
+- **form** — номер активной формы, `null` когда ничего не открыто (десктоп)
+- **formCount** — количество открытых форм. `0` = десктоп. Работает даже если панель открытых окон скрыта
+- **openForms** — `[0, 1, 2]` — номера всех открытых форм в DOM
+- **modal** — `true` когда активная форма — модальный диалог, блокирующий интерфейс
+- **openTabs** — `[{ name, active? }]` из панели открытых окон (только когда панель включена в настройках 1С)
 - **fields** — `[{ name, value, label?, actions?, required? }]`. `actions` = select/clear/open. `required: true` = незаполненное обязательное поле
 - **table** — `{ name, columns, rowCount }` (метаданные; для данных — `readTable()`)
 - **reportSettings** — DCS-фильтры в читаемом виде: `[{ name: "Склад", enabled: true, value: "..." }]`
@@ -239,7 +244,7 @@ await closeForm({ save: false });
 | `selectValue(field, search, opts?)` | Выбрать из справочника. search: текст или `{поле: значение}`. `{ type }` для составного типа | form state с `selected` |
 | `fillTableRow(fields, {tab?, add?, row?})` | Заполнить строку. Значение: строка или `{ value, type }` для составного типа | form state |
 | `deleteTableRow(row, {tab?})` | Удалить строку по индексу | form state |
-| `closeForm({save?})` | Закрыть форму. `save: false` = "Нет", `save: true` = "Да" | form state |
+| `closeForm({save?})` | Закрыть форму. `save: false` = "Нет", `save: true` = "Да". Возвращает `closed: true/false` | form state с `closed` |
 | `filterList(text, {field?, exact?})` | Фильтр списка. Без field = все колонки, с field = расширенный поиск | form state |
 | `unfilterList({field?})` | Снять фильтры (все или конкретный) | form state |
 

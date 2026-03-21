@@ -121,8 +121,18 @@ Switch to an already-open tab/window (fuzzy match).
 
 ### Reading form state
 
-#### `getFormState()` → `{ fields, buttons, tabs, navigation?, table, tables, filters, reportSettings? }`
+#### `getFormState()` → `{ form, formCount, openForms, fields, buttons, tabs, navigation?, table, tables, filters, reportSettings? }`
 Returns current form structure. This is the primary way to understand what's on screen.
+
+**form** — active form number, or `null` when no form is open (desktop).
+
+**formCount** — number of open forms. Use this to know how many windows are stacked. `0` means desktop.
+
+**openForms** — array of all open form numbers (e.g. `[0, 1]`). Works even when the open-windows tab bar is hidden in 1C settings.
+
+**modal** — `true` when the active form is a modal dialog blocking the UI. Only present when modal is active.
+
+**openTabs** — array of `{ name, active? }` from the open-windows tab bar. Only present when the tab bar is enabled in 1C settings. Do NOT rely on this — use `formCount`/`openForms` instead.
 
 **fields** — each field has: `name`, `value`, `label?`, `actions?` (select, clear, open), `required?` (true for unfilled mandatory fields)
 
@@ -303,14 +313,16 @@ await fillTableRow(
 #### `deleteTableRow(row, { tab?, table? })` → form state
 Delete row by 0-based index. `table` targets a specific grid on multi-grid forms.
 
-#### `closeForm({ save? })` → form state
-Close the current form via Escape.
+#### `closeForm({ save? })` → form state with `closed`
+Close the current form via Escape. Returns form state with `closed: true/false` indicating whether the form actually closed.
 
 | Argument | Behavior |
 |----------|----------|
 | `{ save: false }` | Auto-clicks "Нет" on confirmation |
 | `{ save: true }` | Auto-clicks "Да" on confirmation |
 | `{}` (omitted) | Returns `confirmation` field if dialog appears |
+
+**`closed`** — `true` if the form was closed (form number changed), `false` if it stayed open (e.g. Escape was ignored). Always check this to confirm the form actually closed. After closing, check `formCount` to see how many forms remain.
 
 Preferred over `clickElement('×')` — close buttons on tabs are ambiguous.
 
