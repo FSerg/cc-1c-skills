@@ -7,7 +7,7 @@
 | Навык | Параметры | Описание |
 |-------|-----------|----------|
 | `/cfe-init` | `<Name> [-Purpose Patch\|Customization\|AddOn] [-CompatibilityMode]` | Создание расширения (scaffold XML-исходников) |
-| `/cfe-borrow` | `-ExtensionPath <path> -ConfigPath <path> -Object "Type.Name"` | Заимствование объектов из конфигурации |
+| `/cfe-borrow` | `-ExtensionPath <path> -ConfigPath <path> -Object "Type.Name" [-BorrowMainAttribute]` | Заимствование объектов из конфигурации |
 | `/cfe-patch-method` | `-ExtensionPath <path> -ModulePath "Type.Name.Module" -MethodName "X" -InterceptorType Before` | Генерация перехватчика метода |
 | `/cfe-validate` | `<ExtensionPath> [-MaxErrors 30]` | Валидация структурной корректности (9 проверок) |
 | `/cfe-diff` | `-ExtensionPath <path> -ConfigPath <path> [-Mode A\|B]` | Анализ расширения и проверка переноса |
@@ -42,6 +42,21 @@ Claude выполнит:
 2. `/cfe-init` — создать расширение с нужным `CompatibilityMode`
 3. `/cfe-borrow` — заимствовать `Catalog.Контрагенты`
 4. `/cfe-patch-method` — создать перехватчик нужного метода
+5. `/cfe-validate` — проверить результат
+
+### Добавление реквизита в объект и вывод на форму
+
+```
+> Добавь реквизит "ОсновнойПоставщик" (тип СправочникСсылка.Партнеры)
+  в справочник Номенклатура и выведи на форму элемента.
+  Конфигурация ERP в C:\cfsrc\erp
+```
+
+Claude выполнит:
+1. `/cfe-init` — создать расширение
+2. `/cfe-borrow -Object "Catalog.Номенклатура.Form.ФормаЭлемента" -BorrowMainAttribute` — заимствовать форму с реквизитами объекта
+3. `/meta-edit` — добавить новый реквизит `Расш1_ОсновнойПоставщик` в Номенклатура
+4. `/form-edit` — вывести реквизит на форму
 5. `/cfe-validate` — проверить результат
 
 ### Анализ существующего расширения
@@ -102,6 +117,18 @@ Claude вызовет `/cfe-diff -Mode B` — найдёт блоки `#Вста
 - `Document.Заказ ;; Catalog.Товары` — несколько объектов через `;;`
 
 Поддерживаемые типы: Catalog, Document, Enum, CommonModule, Report, DataProcessor, ExchangePlan, InformationRegister, AccumulationRegister, AccountingRegister, CalculationRegister, ChartOfAccounts, ChartOfCharacteristicTypes, ChartOfCalculationTypes, BusinessProcess, Task, и другие (44 типа).
+
+### Заимствование формы с реквизитами объекта (-BorrowMainAttribute)
+
+При добавлении нового реквизита на заимствованную форму нужна опция `-BorrowMainAttribute`:
+- Без неё форма заимствуется "пустой" — только визуальные элементы, без привязки к данным
+- С ней — форма сохраняет `DataPath` привязки к реквизитам объекта (`Объект.XXX`)
+
+Два режима:
+- `Form` (по умолчанию) — заимствует только реквизиты, выведенные на форму
+- `All` — заимствует все реквизиты объекта (включая не выведенные на форму)
+
+Каскадно заимствует зависимые объекты по типам реквизитов (справочники, перечисления, определяемые типы) как оболочки. Если зависимый объект уже заимствован с содержимым — не перезаписывает его.
 
 ## cfe-patch-method — перехват методов
 
