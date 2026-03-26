@@ -2596,6 +2596,46 @@ export async function fillTableRow(fields, { tab, add, row, table } = {}) {
 
   // 2b. Enter edit mode on existing row by dblclick
   if (row != null) {
+    // Sort fields by colindex (leftmost first) so Tab traversal covers all fields left-to-right
+    const sortedKeys = await page.evaluate(`(() => {
+      const grid = ${gridSelector
+        ? `document.querySelector(${JSON.stringify(gridSelector)})`
+        : `(() => { const grids = [...document.querySelectorAll('.grid')].filter(el => el.offsetWidth > 0); return grids[grids.length - 1]; })()`};
+      if (!grid) return null;
+      const head = grid.querySelector('.gridHead');
+      if (!head) return null;
+      const headLine = head.querySelector('.gridLine') || head;
+      const cols = [];
+      [...headLine.children].forEach(box => {
+        if (box.offsetWidth === 0) return;
+        const t = ((box.querySelector('.gridBoxText') || box).innerText?.trim() || '').toLowerCase();
+        const ci = parseInt(box.getAttribute('colindex') || '-1');
+        if (t) cols.push({ text: t, colindex: ci });
+      });
+      const keys = ${JSON.stringify(Object.keys(fields).map(k => k.toLowerCase()))};
+      const mapped = keys.map(k => {
+        const exact = cols.find(c => c.text === k);
+        if (exact) return { key: k, colindex: exact.colindex };
+        const inc = cols.find(c => c.text.includes(k) || k.includes(c.text));
+        return { key: k, colindex: inc ? inc.colindex : 999 };
+      });
+      mapped.sort((a, b) => a.colindex - b.colindex);
+      return mapped.map(m => m.key);
+    })()`);
+    if (sortedKeys) {
+      // Rebuild fields in sorted order
+      const sortedFields = {};
+      for (const kl of sortedKeys) {
+        const origKey = Object.keys(fields).find(k => k.toLowerCase() === kl);
+        if (origKey) sortedFields[origKey] = fields[origKey];
+      }
+      // Add any keys not matched in header (preserve original order for those)
+      for (const k of Object.keys(fields)) {
+        if (!(k in sortedFields)) sortedFields[k] = fields[k];
+      }
+      fields = sortedFields;
+    }
+
     const fieldKeys = JSON.stringify(Object.keys(fields).map(k => k.toLowerCase()));
     const cellCoords = await page.evaluate(`(() => {
       const grid = ${gridSelector
@@ -2606,35 +2646,45 @@ export async function fillTableRow(fields, { tab, add, row, table } = {}) {
       const body = grid.querySelector('.gridBody');
       if (!head || !body) return { error: 'no_grid_body' };
 
-      // Read column headers to find target column index
+      // Read column headers to find target colindex
       const headLine = head.querySelector('.gridLine') || head;
       const cols = [];
-      [...headLine.children].forEach((box, i) => {
+      [...headLine.children].forEach(box => {
         if (box.offsetWidth === 0) return;
         const t = box.querySelector('.gridBoxText');
-        cols.push({ idx: i, text: ((t || box).innerText?.trim() || '').toLowerCase() });
+        const ci = box.getAttribute('colindex');
+        cols.push({ colindex: ci, text: ((t || box).innerText?.trim() || '').toLowerCase() });
       });
 
       const keys = ${fieldKeys};
-      let targetIdx = -1;
+      let targetColindex = null;
       for (const key of keys) {
         const exact = cols.find(c => c.text === key);
-        if (exact) { targetIdx = exact.idx; break; }
+        if (exact) { targetColindex = exact.colindex; break; }
         const inc = cols.find(c => c.text.includes(key) || key.includes(c.text));
-        if (inc) { targetIdx = inc.idx; break; }
+        if (inc) { targetColindex = inc.colindex; break; }
       }
 
       const rows = [...body.querySelectorAll('.gridLine')];
       if (${row} >= rows.length) return { error: 'row_out_of_range', total: rows.length };
       const line = rows[${row}];
-      const boxes = [...line.children].filter(b => b.offsetWidth > 0 && !b.classList.contains('gridBoxComp'));
 
-      // Use matched column, or fall back to second visible box (skip N column)
-      const box = targetIdx >= 0 ? boxes[targetIdx] : (boxes.length > 1 ? boxes[1] : boxes[0]);
+      // Find body cell by colindex (reliable across merged headers)
+      let box = null;
+      if (targetColindex != null) {
+        box = [...line.children].find(b => b.offsetWidth > 0 && b.getAttribute('colindex') === targetColindex);
+      }
+      // Fallback: second visible box (skip checkbox/N column)
+      if (!box) {
+        const boxes = [...line.children].filter(b => b.offsetWidth > 0 && !b.classList.contains('gridBoxComp'));
+        box = boxes.length > 1 ? boxes[1] : boxes[0];
+      }
       if (!box) return { error: 'no_cell' };
+      // Scroll into view if off-screen
+      box.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       const cell = box.querySelector('.gridBoxText') || box;
       const r = cell.getBoundingClientRect();
-      const currentText = (cell.innerText?.trim() || '').replace(/\u00a0/g, ' ');
+      const currentText = (cell.innerText?.trim() || '').replace(/\\u00a0/g, ' ');
       return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), currentText };
     })()`);
 
@@ -2753,24 +2803,33 @@ export async function fillTableRow(fields, { tab, add, row, table } = {}) {
       }
     }
 
-    // When click entered INPUT mode but no selection form yet — try F4 (tree grid ref fields)
+    // When click entered INPUT mode but no selection form yet — try F4 only for tree grids
+    // (tree grid ref fields need F4 to open selection form; flat grids work via Tab-loop)
     if (inEdit && directEditForm === null) {
-      await page.keyboard.press('F4');
-      for (let fw = 0; fw < 8; fw++) {
-        await page.waitForTimeout(200);
-        directEditForm = await page.evaluate(`(() => {
-          const forms = {};
-          document.querySelectorAll('[id]').forEach(el => {
-            if (el.offsetWidth === 0 && el.offsetHeight === 0) return;
-            const m = el.id.match(/^form(\\d+)_/);
-            if (m) forms[m[1]] = true;
-          });
-          const nums = Object.keys(forms).map(Number).filter(n => n > ${formNum});
-          return nums.length > 0 ? Math.max(...nums) : null;
-        })()`);
-        if (directEditForm !== null) break;
+      const isTreeGrid = await page.evaluate(`(() => {
+        const grid = ${gridSelector
+          ? `document.querySelector(${JSON.stringify(gridSelector)})`
+          : `(() => { const grids = [...document.querySelectorAll('.grid')].filter(el => el.offsetWidth > 0); return grids[grids.length - 1]; })()`};
+        return grid ? !!grid.querySelector('.gridBoxTree') : false;
+      })()`);
+      if (isTreeGrid) {
+        await page.keyboard.press('F4');
+        for (let fw = 0; fw < 8; fw++) {
+          await page.waitForTimeout(200);
+          directEditForm = await page.evaluate(`(() => {
+            const forms = {};
+            document.querySelectorAll('[id]').forEach(el => {
+              if (el.offsetWidth === 0 && el.offsetHeight === 0) return;
+              const m = el.id.match(/^form(\\d+)_/);
+              if (m) forms[m[1]] = true;
+            });
+            const nums = Object.keys(forms).map(Number).filter(n => n > ${formNum});
+            return nums.length > 0 ? Math.max(...nums) : null;
+          })()`);
+          if (directEditForm !== null) break;
+        }
+        // If F4 didn't open a selection form, fall through to Tab loop
       }
-      // If F4 didn't open a selection form, the cell is a plain text field — fall through to Tab loop
     }
 
     // Direct-edit mode: selection form opened on dblclick/F4 (e.g. tree grid with immediate editing).
@@ -2848,28 +2907,29 @@ export async function fillTableRow(fields, { tab, add, row, table } = {}) {
           if (!head || !body) return null;
           const headLine = head.querySelector('.gridLine') || head;
           const cols = [];
-          [...headLine.children].forEach((box, i) => {
+          [...headLine.children].forEach(box => {
             if (box.offsetWidth === 0) return;
             const t = box.querySelector('.gridBoxText');
-            cols.push({ idx: i, text: ((t || box).innerText?.trim() || '').toLowerCase() });
+            const ci = box.getAttribute('colindex');
+            cols.push({ colindex: ci, text: ((t || box).innerText?.trim() || '').toLowerCase() });
           });
           const kl = ${JSON.stringify(key.toLowerCase())};
           const klNoSpace = kl.replace(/[\\s\\-]+/g, '');
-          let colIdx = -1;
+          let targetColindex = null;
           const exact = cols.find(c => c.text === kl);
-          if (exact) colIdx = exact.idx;
+          if (exact) targetColindex = exact.colindex;
           else {
             const inc = cols.find(c => c.text.includes(kl) || kl.includes(c.text)
               || c.text.includes(klNoSpace) || klNoSpace.includes(c.text));
-            if (inc) colIdx = inc.idx;
+            if (inc) targetColindex = inc.colindex;
           }
-          if (colIdx < 0) return null;
+          if (targetColindex == null) return null;
           const rows = [...body.querySelectorAll('.gridLine')];
           if (${row} >= rows.length) return null;
           const line = rows[${row}];
-          const boxes = [...line.children].filter(b => b.offsetWidth > 0 && !b.classList.contains('gridBoxComp'));
-          const box = boxes[colIdx];
+          const box = [...line.children].find(b => b.offsetWidth > 0 && b.getAttribute('colindex') === targetColindex);
           if (!box) return null;
+          box.scrollIntoView({ block: 'nearest', inline: 'nearest' });
           const cell = box.querySelector('.gridBoxText') || box;
           const r = cell.getBoundingClientRect();
           const currentText = (cell.innerText?.trim() || '').replace(/\\u00a0/g, ' ');
@@ -2888,23 +2948,62 @@ export async function fillTableRow(fields, { tab, add, row, table } = {}) {
           continue;
         }
         await page.mouse.dblclick(nextCoords.x, nextCoords.y);
-        // Poll for selection form (with F4 fallback if dblclick didn't open it)
-        let selForm = null;
-        for (let attempt = 0; attempt < 2 && selForm === null; attempt++) {
-          if (attempt === 1) await page.keyboard.press('F4'); // F4 fallback
-          for (let sw = 0; sw < 6; sw++) {
+        await page.waitForTimeout(300);
+        // Check if dblclick entered INPUT mode (plain text/numeric field) — before F4 which may open calculator
+        const inInputAfterDblclick = await page.evaluate(`(() => {
+          const f = document.activeElement;
+          if (!f || (f.tagName !== 'INPUT' && f.tagName !== 'TEXTAREA')) return false;
+          let n = f; while (n) { if (n.classList?.contains('grid')) return true; n = n.parentElement; }
+          return false;
+        })()`);
+        // Also check if a selection form already appeared
+        let selForm = await page.evaluate(`(() => {
+          const forms = {};
+          document.querySelectorAll('[id]').forEach(el => {
+            if (el.offsetWidth === 0 && el.offsetHeight === 0) return;
+            const m = el.id.match(/^form(\\d+)_/);
+            if (m) forms[m[1]] = true;
+          });
+          const nums = Object.keys(forms).map(Number).filter(n => n > ${formNum});
+          return nums.length > 0 ? Math.max(...nums) : null;
+        })()`);
+        if (selForm === null && inInputAfterDblclick) {
+          // Plain text/numeric field — fill via clipboard paste
+          await page.evaluate(`navigator.clipboard.writeText(${JSON.stringify(info.value)})`);
+          await page.keyboard.press('Control+a');
+          await page.keyboard.press('Control+v');
+          await page.waitForTimeout(400);
+          // Dismiss EDD autocomplete if it appeared
+          const hasEdd = await page.evaluate(`(() => {
+            const edd = document.getElementById('editDropDown');
+            return edd && edd.offsetWidth > 0;
+          })()`);
+          if (hasEdd) {
+            await page.keyboard.press('Escape');
             await page.waitForTimeout(200);
-            selForm = await page.evaluate(`(() => {
-              const forms = {};
-              document.querySelectorAll('[id]').forEach(el => {
-                if (el.offsetWidth === 0 && el.offsetHeight === 0) return;
-                const m = el.id.match(/^form(\\d+)_/);
-                if (m) forms[m[1]] = true;
-              });
-              const nums = Object.keys(forms).map(Number).filter(n => n > ${formNum});
-              return nums.length > 0 ? Math.max(...nums) : null;
-            })()`);
-            if (selForm !== null) break;
+          }
+          info.filled = true;
+          results.push({ field: key, ok: true, method: 'paste' });
+          continue;
+        }
+        // Poll for selection form (with F4 fallback if dblclick didn't open it)
+        if (selForm === null) {
+          for (let attempt = 0; attempt < 2 && selForm === null; attempt++) {
+            if (attempt === 1) await page.keyboard.press('F4'); // F4 fallback
+            for (let sw = 0; sw < 6; sw++) {
+              await page.waitForTimeout(200);
+              selForm = await page.evaluate(`(() => {
+                const forms = {};
+                document.querySelectorAll('[id]').forEach(el => {
+                  if (el.offsetWidth === 0 && el.offsetHeight === 0) return;
+                  const m = el.id.match(/^form(\\d+)_/);
+                  if (m) forms[m[1]] = true;
+                });
+                const nums = Object.keys(forms).map(Number).filter(n => n > ${formNum});
+                return nums.length > 0 ? Math.max(...nums) : null;
+              })()`);
+              if (selForm !== null) break;
+            }
           }
         }
         if (selForm === null) {
