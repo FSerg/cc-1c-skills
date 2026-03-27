@@ -314,6 +314,62 @@ async function waitForStable(previousFormNum = null) {
 }
 
 /**
+ * Start monitoring network activity via CDP.
+ * Must be called BEFORE the click so it captures all server requests.
+ * Returns a monitor object with waitDone() and cleanup() methods.
+ */
+async function startNetworkMonitor() {
+  const client = await page.context().newCDPSession(page);
+  await client.send('Network.enable');
+
+  let pending = 0;
+  let total = 0;
+  let lastZeroTime = null;
+  const DEBOUNCE = 300;
+
+  client.on('Network.requestWillBeSent', () => {
+    pending++;
+    total++;
+    lastZeroTime = null;
+  });
+  client.on('Network.loadingFinished', () => {
+    if (--pending === 0) lastZeroTime = Date.now();
+  });
+  client.on('Network.loadingFailed', () => {
+    if (--pending === 0) lastZeroTime = Date.now();
+  });
+
+  return {
+    /** Wait until all network requests complete (300ms debounce) or UI element appears. */
+    async waitDone(timeout = 10000) {
+      const start = Date.now();
+      while (Date.now() - start < timeout) {
+        await page.waitForTimeout(50);
+
+        // Check for UI elements (modal, balloon, confirm)
+        const ui = await page.evaluate(`(() => {
+          const modal = document.querySelector('#modalSurface:not([style*="display: none"])');
+          const balloon = document.querySelector('.balloon');
+          const confirm = document.querySelector('.confirm');
+          return !!(modal || balloon || confirm);
+        })()`);
+        if (ui) return;
+
+        // CDP debounce: pending===0 held for DEBOUNCE ms
+        if (total > 0 && pending === 0 && lastZeroTime !== null) {
+          if (Date.now() - lastZeroTime >= DEBOUNCE) return;
+        }
+      }
+    },
+    /** Detach CDP session. Always call this when done. */
+    async cleanup() {
+      await client.send('Network.disable').catch(() => {});
+      await client.detach().catch(() => {});
+    }
+  };
+}
+
+/**
  * Poll until a JS expression returns truthy, or timeout (ms) expires.
  * Resolves early — typically within 100-300ms instead of fixed delays.
  */
@@ -1859,10 +1915,11 @@ export async function fillField(name, value) {
 }
 
 /** Click a button/hyperlink/tab on the current form. Use {dblclick: true} to double-click (open items from lists). */
-export async function clickElement(text, { dblclick, table, toggle, expand } = {}) {
+export async function clickElement(text, { dblclick, table, toggle, expand, timeout } = {}) {
   ensureConnected();
   await dismissPendingErrors();
   if (highlightMode) try { await highlight(text, { table }); await page.waitForTimeout(500); await unhighlight(); } catch {}
+  let netMonitor = null;
   try {
 
   // First check if there's a confirmation dialog — click matching button
@@ -2081,6 +2138,12 @@ export async function clickElement(text, { dblclick, table, toggle, expand } = {
     return state;
   }
 
+  // Start CDP network monitor BEFORE the click for buttons —
+  // so we capture all server requests triggered by the click.
+  if (target.kind === 'button') {
+    try { netMonitor = await startNetworkMonitor(); } catch {}
+  }
+
   // Tabs without ID — use coordinate click to avoid global [data-content] ambiguity
   if (target.kind === 'tab' && !target.id && target.x && target.y) {
     await page.mouse.click(target.x, target.y);
@@ -2148,15 +2211,11 @@ export async function clickElement(text, { dblclick, table, toggle, expand } = {
         let n = f; while (n) { if (n.classList?.contains('grid')) return true; n = n.parentElement; }
         return false;
       })()`);
-      if (!inGridEdit) {
+      if (!inGridEdit && netMonitor) {
         // Form didn't change — server might still be processing.
-        // waitForSelector uses MutationObserver internally — doesn't block event loop.
-        try {
-          await page.waitForSelector(
-            '#modalSurface:not([style*="display: none"]), .balloon, .confirm',
-            { state: 'visible', timeout: 10000 }
-          );
-        } catch {}
+        // CDP monitor was started before click — wait for all requests to complete
+        // (300ms debounce) or for a modal/balloon/confirm to appear.
+        await netMonitor.waitDone(timeout);
         await waitForStable();
       }
     }
@@ -2175,7 +2234,10 @@ export async function clickElement(text, { dblclick, table, toggle, expand } = {
   }
   return state;
 
-  } finally { if (highlightMode) try { await unhighlight(); } catch {} }
+  } finally {
+    if (netMonitor) try { await netMonitor.cleanup(); } catch {}
+    if (highlightMode) try { await unhighlight(); } catch {}
+  }
 }
 
 /**
