@@ -2275,6 +2275,7 @@ export async function closeForm({ save } = {}) {
       for (const b of btns) {
         const txt = (await b.textContent()).trim();
         if (txt === label) {
+          if (recorder) await page.waitForTimeout(1500); // show confirmation to viewer during recording
           await b.click({ force: true });
           await waitForStable(beforeForm);
           break;
