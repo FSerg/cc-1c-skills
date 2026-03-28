@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// skill-test-runner v0.1 — Snapshot-based regression tests for 1C skill scripts
+// skill-test-runner v0.2 — Snapshot-based regression tests for 1C skill scripts
 // Usage: node tests/skills/runner.mjs [filter] [--update-snapshots] [--runtime python] [--json report.json]
 
 import { execFileSync } from 'child_process';
@@ -79,6 +79,8 @@ function discoverCases(filter) {
 
 // ─── Setup / Fixtures ───────────────────────────────────────────────────────
 
+const SKIP = Symbol('skip');
+
 function ensureSetup(setupName, runtime, skillCasesDir) {
   if (setupName === 'none' || !setupName) return null;
 
@@ -87,6 +89,14 @@ function ensureSetup(setupName, runtime, skillCasesDir) {
     const fixturePath = join(skillCasesDir, 'fixtures', setupName.slice('fixture:'.length));
     if (!existsSync(fixturePath)) throw new Error(`Fixture not found: ${fixturePath}`);
     return fixturePath;
+  }
+
+  if (setupName.startsWith('external:')) {
+    // External path — use real config dump as read-only fixture.
+    // Returns SKIP if path is unavailable (tests gracefully skipped).
+    const extPath = resolve(REPO_ROOT, setupName.slice('external:'.length));
+    if (!existsSync(extPath)) return SKIP;
+    return extPath;
   }
 
   if (setupName === 'empty-config') {
@@ -146,16 +156,22 @@ function execSkillRaw(runtime, scriptPath, args, cwd) {
 
 // ─── Workspace ──────────────────────────────────────────────────────────────
 
-function createWorkspace(fixturePath) {
+function createWorkspace(fixturePath, readOnly) {
+  if (readOnly && fixturePath) {
+    // Use fixture path directly without copying (for large external dirs)
+    return { path: fixturePath, readOnly: true };
+  }
   const tmp = mkdtempSync(join(tmpdir(), 'skill-test-'));
   if (fixturePath) {
     cpSync(fixturePath, tmp, { recursive: true });
   }
-  return tmp;
+  return { path: tmp, readOnly: false };
 }
 
-function cleanupWorkspace(tmp) {
-  rmSync(tmp, { recursive: true, force: true });
+function cleanupWorkspace(ws) {
+  if (!ws.readOnly) {
+    rmSync(ws.path, { recursive: true, force: true });
+  }
 }
 
 // ─── Arg building ───────────────────────────────────────────────────────────
@@ -327,6 +343,7 @@ function runCase(testCase, opts) {
   const { skillConfig, caseData, snapshotDir } = testCase;
   const t0 = performance.now();
   const setupName = caseData.setup || skillConfig.setup || 'none';
+  let workspace = null;
   let workDir = null;
   let inputFile = null;
 
@@ -334,7 +351,21 @@ function runCase(testCase, opts) {
     // 1. Setup workspace
     const skillCasesDir = join(CASES, testCase.skillDir);
     const fixturePath = ensureSetup(setupName, opts.runtime, skillCasesDir);
-    workDir = createWorkspace(fixturePath);
+    if (fixturePath === SKIP) {
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+      return {
+        id: testCase.id,
+        skill: testCase.skillDir,
+        name: testCase.name,
+        passed: true,
+        skipped: true,
+        errors: [],
+        elapsed: `${elapsed}s`,
+      };
+    }
+    const isExternal = typeof setupName === 'string' && setupName.startsWith('external:');
+    workspace = createWorkspace(fixturePath, isExternal);
+    workDir = workspace.path;
 
     // 2. Pre-run steps (setup prerequisites like creating objects)
     if (caseData.preRun) {
@@ -469,14 +500,15 @@ function runCase(testCase, opts) {
       elapsed: `${elapsed}s`,
     };
   } finally {
-    if (workDir) cleanupWorkspace(workDir);
+    if (workspace) cleanupWorkspace(workspace);
   }
 }
 
 // ─── Reporter ───────────────────────────────────────────────────────────────
 
 function printReport(results, opts) {
-  const passed = results.filter(r => r.passed);
+  const skipped = results.filter(r => r.skipped);
+  const passed = results.filter(r => r.passed && !r.skipped);
   const failed = results.filter(r => !r.passed);
 
   // Group by skill
@@ -499,8 +531,8 @@ function printReport(results, opts) {
       // Verbose: show every case with id
       console.log(`  ${skill}`);
       for (const r of cases) {
-        const icon = r.passed ? '\u2713' : '\u2717';
-        const suffix = r.snapshotUpdated ? ' [snapshot updated]' : '';
+        const icon = r.skipped ? '\u25CB' : r.passed ? '\u2713' : '\u2717';
+        const suffix = r.skipped ? ' [skipped]' : r.snapshotUpdated ? ' [snapshot updated]' : '';
         console.log(`    ${icon} ${r.name} (${r.elapsed})  ${r.id}${suffix}`);
         if (!r.passed) {
           for (const err of r.errors) {
@@ -512,8 +544,10 @@ function printReport(results, opts) {
       }
     } else {
       // Compact: one line per skill, details only for failures
+      const skillSkipped = cases.filter(r => r.skipped).length;
       const icon = allOk ? '\u2713' : '\u2717';
-      console.log(`  ${icon} ${skill}  ${skillPassed}/${skillTotal} (${skillTime}s)`);
+      const skipSuffix = skillSkipped > 0 ? `, ${skillSkipped} skipped` : '';
+      console.log(`  ${icon} ${skill}  ${skillPassed}/${skillTotal} (${skillTime}s${skipSuffix})`);
       if (!allOk) {
         for (const r of skillFailed) {
           console.log(`    \u2717 ${r.name}  ${r.id}`);
@@ -529,7 +563,8 @@ function printReport(results, opts) {
 
   const totalTime = results.reduce((s, r) => s + parseFloat(r.elapsed), 0).toFixed(1);
   console.log('');
-  console.log(`  Passed: ${passed.length} | Failed: ${failed.length} | Total: ${results.length} | Time: ${totalTime}s`);
+  const skippedStr = skipped.length > 0 ? ` | Skipped: ${skipped.length}` : '';
+  console.log(`  Passed: ${passed.length} | Failed: ${failed.length}${skippedStr} | Total: ${results.length} | Time: ${totalTime}s`);
   console.log('');
 
   if (opts.jsonReport) {

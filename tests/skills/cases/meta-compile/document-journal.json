@@ -1,0 +1,15 @@
+{
+  "name": "Журнал документов с графами",
+  "input": {
+    "type": "DocumentJournal",
+    "name": "ЖурналСкладскихДокументов",
+    "registeredDocuments": ["Document.ПриходнаяНакладная", "Document.РасходнаяНакладная"],
+    "columns": [
+      { "name": "Склад", "references": ["Document.ПриходнаяНакладная.Attribute.Склад"] },
+      "Контрагент"
+    ]
+  },
+  "expect": {
+    "files": ["DocumentJournals/ЖурналСкладскихДокументов.xml"]
+  }
+}

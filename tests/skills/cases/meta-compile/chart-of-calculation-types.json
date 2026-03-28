@@ -1,0 +1,15 @@
+{
+  "name": "План видов расчёта с зависимостью",
+  "input": {
+    "type": "ChartOfCalculationTypes",
+    "name": "ВидыНачислений",
+    "codeLength": 5,
+    "descriptionLength": 50,
+    "actionPeriodUse": true,
+    "dependenceOnCalculationTypes": "NotDependOnCalculationTypes",
+    "attributes": ["Формула: String(200)"]
+  },
+  "expect": {
+    "files": ["ChartsOfCalculationTypes/ВидыНачислений.xml", "ChartsOfCalculationTypes/ВидыНачислений/Ext/ObjectModule.bsl"]
+  }
+}

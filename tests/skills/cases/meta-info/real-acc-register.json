@@ -1,0 +1,6 @@
+{
+  "name": "Реальный регистр бухгалтерии Хозрасчетный (БП)",
+  "setup": "external:C:/WS/tasks/cfsrc/acc_8.3.24",
+  "params": { "objectPath": "AccountingRegisters/Хозрасчетный" },
+  "expect": { "stdoutContains": "Хозрасчетный" }
+}
