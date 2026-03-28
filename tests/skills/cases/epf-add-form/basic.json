@@ -1,0 +1,10 @@
+{
+  "name": "Добавление формы к обработке",
+  "preRun": [
+    {
+      "script": "epf-init/scripts/init",
+      "args": { "-Name": "МояОбработка", "-SrcDir": "{workDir}" }
+    }
+  ],
+  "params": { "processorName": "МояОбработка", "formName": "Форма" }
+}

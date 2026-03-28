@@ -1,0 +1,12 @@
+{
+  "script": "erf-init/scripts/init",
+  "setup": "none",
+  "args": [
+    { "flag": "-Name", "from": "case.name" },
+    { "flag": "-SrcDir", "from": "workDir" }
+  ],
+  "snapshot": {
+    "root": "workDir",
+    "normalizeUuids": true
+  }
+}

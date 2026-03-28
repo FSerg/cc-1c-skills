@@ -1,0 +1,12 @@
+{
+  "script": "cf-edit/scripts/cf-edit",
+  "setup": "empty-config",
+  "args": [
+    { "flag": "-ConfigPath", "from": "workDir" },
+    { "flag": "-DefinitionFile", "from": "inputFile" }
+  ],
+  "snapshot": {
+    "root": "workDir",
+    "normalizeUuids": true
+  }
+}

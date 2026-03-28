@@ -1,0 +1,13 @@
+{
+  "script": "epf-add-form/scripts/add-form",
+  "setup": "none",
+  "args": [
+    { "flag": "-ProcessorName", "from": "case.processorName" },
+    { "flag": "-FormName", "from": "case.formName" },
+    { "flag": "-SrcDir", "from": "workDir" }
+  ],
+  "snapshot": {
+    "root": "workDir",
+    "normalizeUuids": true
+  }
+}
