@@ -86,7 +86,7 @@ Switch-параметры (`-NoValidate`) → `action='store_true'`.
 | `[System.Xml.XmlDocument] + PreserveWhitespace` | `lxml.etree.XMLParser(remove_blank_text=False)` |
 | `$xmlDoc.SelectSingleNode(xpath, $ns)` | `root.find(xpath, namespaces=NSMAP)` |
 | `$xmlDoc.SelectNodes(xpath, $ns)` | `root.findall(xpath, namespaces=NSMAP)` |
-| `XmlWriter + MemoryStream + BOM fix` | `etree.tostring(root, xml_declaration=True, encoding='UTF-8')` |
+| `XmlWriter + MemoryStream + BOM fix` | `etree.tostring(root, xml_declaration=True, encoding='UTF-8')` + declaration fix |
 | `[System.Guid]::NewGuid().ToString()` | `str(uuid.uuid4())` |
 | `$json \| ConvertFrom-Json` | `json.loads(text)` |
 | `ConvertTo-Json -Depth 10` | `json.dumps(obj, ensure_ascii=False, indent=2)` |
@@ -145,8 +145,14 @@ root = tree.getroot()
 
 # Сохранение с BOM
 xml_bytes = etree.tostring(tree, xml_declaration=True, encoding='UTF-8')
-# Fix encoding case: lxml пишет utf-8, 1C ожидает UTF-8
-xml_bytes = xml_bytes.replace(b"encoding='UTF-8'", b'encoding="UTF-8"')
+# Fix declaration: etree пишет одинарные кавычки и uppercase encoding,
+# PS1 XmlWriter пишет двойные кавычки и lowercase encoding
+xml_bytes = xml_bytes.replace(
+    b"<?xml version='1.0' encoding='UTF-8'?>",
+    b'<?xml version="1.0" encoding="utf-8"?>')
+# Trailing newline (PS1 XmlWriter добавляет, etree — нет)
+if not xml_bytes.endswith(b"\n"):
+    xml_bytes += b"\n"
 with open(path, 'wb') as f:
     f.write(b'\xef\xbb\xbf')  # BOM
     f.write(xml_bytes)
@@ -167,8 +173,36 @@ node = root.find('.//md:ChildObjects/md:Form', NSMAP)
 <v8:Type xmlns:d5p1="http://v8.1c.ru/8.1/data/enterprise/current-config">d5p1:CatalogRef.XXX</v8:Type>
 ```
 
-### encoding="UTF-8" (uppercase)
-1C ожидает `encoding="UTF-8"`. lxml по умолчанию пишет `encoding='UTF-8'` с одинарными кавычками — нужна замена на двойные.
+### XML declaration кавычки и encoding
+lxml/etree пишут `<?xml version='1.0' encoding='UTF-8'?>` (одинарные кавычки, uppercase). PS1 XmlWriter пишет `<?xml version="1.0" encoding="utf-8"?>` (двойные, lowercase). 1C принимает оба варианта, но одинарные кавычки — нестандартны. Замена всего declaration — в секции "Сохранение XML с lxml".
+
+### etree vs XmlDocument — различия сериализации
+
+Python etree (lxml и stdlib) сериализует XML иначе, чем PS1 XmlDocument:
+
+| Аспект | PS1 XmlDocument | Python etree | Влияние |
+|--------|----------------|--------------|---------|
+| Declaration кавычки | `version="1.0"` | `version='1.0'` | Нестандартные одинарные кавычки |
+| Encoding case | `encoding="utf-8"` | `encoding='UTF-8'` | Косметическое |
+| Self-closing space | `<Tag />` | `<Tag/>` | Косметическое, 1C принимает оба |
+| Trailing newline | Да | Нет | Расхождение при побайтовом сравнении |
+| Unused xmlns | Сохраняет | Удаляет | Файл валиден, но отличается от канона |
+| CR в text content | `\r` as-is | `&#13;` entity | Разный формат, одинаковый смысл |
+| Пустые элементы | `<Tag>\n</Tag>` | `<Tag/>` | Косметическое |
+
+Все эти различия обрабатываются `normalizeXmlContent()` в тест-раннере (только для `--runtime python`). PS1 тесты остаются строгими.
+
+### Hashtable vs dict — порядок итерации
+
+PS1 `@{}` (Hashtable) итерирует ключи в порядке хэш-кодов. Python `dict` — в порядке вставки. Если порядок элементов влияет на вывод (присвоение индексов, генерация UUID), используйте `sorted()` в Python **и** `| Sort-Object` в PS1 для детерминизма.
+
+### Regex: (?i) inline flag в Python 3.11+
+
+PS1: `'^(?i)desc$'` — работает. Python 3.11+: `r'^(?i)desc$'` — ошибка. Inline-флаг `(?i)` должен быть в начале строки паттерна: `r'(?i)^desc$'` или `re.IGNORECASE`.
+
+### Обращение к отсутствующим свойствам
+
+PS1 молча возвращает `$null` при обращении к несуществующему свойству (`.empty` на массиве). Python падает с `AttributeError`. Добавляйте `isinstance()` проверки при портировании.
 
 ## Платформозависимые заметки
 
