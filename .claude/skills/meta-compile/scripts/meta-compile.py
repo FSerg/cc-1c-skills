@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# meta-compile v1.3 — Compile 1C metadata object from JSON
+# meta-compile v1.4 — Compile 1C metadata object from JSON
 # Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 
 import argparse
@@ -138,6 +138,83 @@ object_type_synonyms = {
     'ВебСервис': 'WebService',
     'ОпределяемыйТип': 'DefinedType',
 }
+
+# Enum property value synonyms — model often gets these slightly wrong
+enum_value_aliases = {
+    # RegisterType (AccumulationRegister)
+    'Balances': 'Balance', 'Остатки': 'Balance', 'Обороты': 'Turnovers',
+    # WriteMode (InformationRegister)
+    'RecordSubordinate': 'RecorderSubordinate', 'Subordinate': 'RecorderSubordinate',
+    'ПодчинениеРегистратору': 'RecorderSubordinate', 'Независимый': 'Independent',
+    # DependenceOnCalculationTypes (ChartOfCalculationTypes)
+    'NotDependOnCalculationTypes': 'DontUse', 'NoDependence': 'DontUse',
+    'Depend': 'RequireCalculationTypes', 'RequireCalculation': 'RequireCalculationTypes',
+    # InformationRegisterPeriodicity
+    'None': 'Nonperiodical', 'Daily': 'Day', 'Monthly': 'Month',
+    'Quarterly': 'Quarter', 'Yearly': 'Year',
+    'Непериодический': 'Nonperiodical', 'Секунда': 'Second', 'День': 'Day',
+    'Месяц': 'Month', 'Квартал': 'Quarter', 'Год': 'Year',
+    'ПозицияРегистратора': 'RecorderPosition',
+    # DataLockControlMode
+    'Автоматический': 'Automatic', 'Управляемый': 'Managed',
+    # FullTextSearch
+    'Использовать': 'Use', 'НеИспользовать': 'DontUse',
+    # Posting
+    'Разрешить': 'Allow', 'Запретить': 'Deny',
+    # EditType
+    'ВДиалоге': 'InDialog', 'ВСписке': 'InList', 'ОбаСпособа': 'BothWays',
+    # DefaultPresentation
+    'ВВидеНаименования': 'AsDescription', 'ВВидеКода': 'AsCode',
+    # FillChecking
+    'НеПроверять': 'DontCheck', 'Ошибка': 'ShowError', 'Предупреждение': 'ShowWarning',
+    # Indexing
+    'НеИндексировать': 'DontIndex', 'Индексировать': 'Index',
+    'ИндексироватьСДопУпорядочиванием': 'IndexWithAdditionalOrder',
+}
+
+# Valid enum values per property (from meta-validate)
+valid_enum_values = {
+    'RegisterType': ['Balance', 'Turnovers'],
+    'WriteMode': ['Independent', 'RecorderSubordinate'],
+    'InformationRegisterPeriodicity': ['Nonperiodical', 'Second', 'Day', 'Month', 'Quarter', 'Year', 'RecorderPosition'],
+    'DependenceOnCalculationTypes': ['DontUse', 'RequireCalculationTypes'],
+    'DataLockControlMode': ['Automatic', 'Managed'],
+    'FullTextSearch': ['Use', 'DontUse'],
+    'DataHistory': ['Use', 'DontUse'],
+    'DefaultPresentation': ['AsDescription', 'AsCode'],
+    'Posting': ['Allow', 'Deny'],
+    'RealTimePosting': ['Allow', 'Deny'],
+    'EditType': ['InDialog', 'InList', 'BothWays'],
+    'HierarchyType': ['HierarchyFoldersAndItems', 'HierarchyItemsOnly'],
+    'CodeType': ['String', 'Number'],
+    'CodeAllowedLength': ['Variable', 'Fixed'],
+    'NumberType': ['String', 'Number'],
+    'NumberAllowedLength': ['Variable', 'Fixed'],
+    'RegisterRecordsDeletion': ['AutoDelete', 'AutoDeleteOnUnpost', 'AutoDeleteOff'],
+    'RegisterRecordsWritingOnPost': ['WriteModified', 'WriteSelected', 'WriteAll'],
+    'ReturnValuesReuse': ['DontUse', 'DuringRequest', 'DuringSession'],
+    'ReuseSessions': ['DontUse', 'AutoUse'],
+    'FillChecking': ['DontCheck', 'ShowError', 'ShowWarning'],
+    'Indexing': ['DontIndex', 'Index', 'IndexWithAdditionalOrder'],
+}
+
+def normalize_enum_value(prop_name, value):
+    # 1. Check alias dictionary
+    if value in enum_value_aliases:
+        return enum_value_aliases[value]
+    # 2. Case-insensitive match against valid values
+    valid = valid_enum_values.get(prop_name)
+    if valid:
+        for v in valid:
+            if v.lower() == value.lower():
+                return v
+    # 3. Return as-is (validator will catch if wrong)
+    return value
+
+def get_enum_prop(prop_name, field_name, default):
+    val = defn.get(field_name)
+    raw = str(val) if val else default
+    return normalize_enum_value(prop_name, raw)
 
 if not defn.get('type'):
     print("JSON must have 'type' field", file=sys.stderr)
@@ -892,7 +969,7 @@ def emit_catalog_properties(indent):
     emit_mltext(i, 'Synonym', synonym)
     X(f'{i}<Comment/>')
     hierarchical = 'true' if defn.get('hierarchical') is True else 'false'
-    hierarchy_type = str(defn['hierarchyType']) if defn.get('hierarchyType') else 'HierarchyFoldersAndItems'
+    hierarchy_type = get_enum_prop('HierarchyType', 'hierarchyType', 'HierarchyFoldersAndItems')
     X(f'{i}<Hierarchical>{hierarchical}</Hierarchical>')
     X(f'{i}<HierarchyType>{hierarchy_type}</HierarchyType>')
     X(f'{i}<LimitLevelCount>false</LimitLevelCount>')
@@ -903,8 +980,8 @@ def emit_catalog_properties(indent):
     X(f'{i}<SubordinationUse>ToItems</SubordinationUse>')
     code_length = str(defn['codeLength']) if defn.get('codeLength') is not None else '9'
     description_length = str(defn['descriptionLength']) if defn.get('descriptionLength') is not None else '25'
-    code_type = str(defn['codeType']) if defn.get('codeType') else 'String'
-    code_allowed_length = str(defn['codeAllowedLength']) if defn.get('codeAllowedLength') else 'Variable'
+    code_type = get_enum_prop('CodeType', 'codeType', 'String')
+    code_allowed_length = get_enum_prop('CodeAllowedLength', 'codeAllowedLength', 'Variable')
     autonumbering = 'false' if defn.get('autonumbering') is False else 'true'
     check_unique = 'true' if defn.get('checkUnique') is True else 'false'
     X(f'{i}<CodeLength>{code_length}</CodeLength>')
@@ -914,7 +991,7 @@ def emit_catalog_properties(indent):
     X(f'{i}<CodeSeries>WholeCatalog</CodeSeries>')
     X(f'{i}<CheckUnique>{check_unique}</CheckUnique>')
     X(f'{i}<Autonumbering>{autonumbering}</Autonumbering>')
-    default_presentation = str(defn['defaultPresentation']) if defn.get('defaultPresentation') else 'AsDescription'
+    default_presentation = get_enum_prop('DefaultPresentation', 'defaultPresentation', 'AsDescription')
     X(f'{i}<DefaultPresentation>{default_presentation}</DefaultPresentation>')
     emit_standard_attributes(i, 'Catalog')
     X(f'{i}<Characteristics/>')
@@ -942,9 +1019,9 @@ def emit_catalog_properties(indent):
     X(f'{i}<IncludeHelpInContents>false</IncludeHelpInContents>')
     X(f'{i}<BasedOn/>')
     X(f'{i}<DataLockFields/>')
-    data_lock_control_mode = str(defn['dataLockControlMode']) if defn.get('dataLockControlMode') else 'Automatic'
+    data_lock_control_mode = get_enum_prop('DataLockControlMode', 'dataLockControlMode', 'Automatic')
     X(f'{i}<DataLockControlMode>{data_lock_control_mode}</DataLockControlMode>')
-    full_text_search = str(defn['fullTextSearch']) if defn.get('fullTextSearch') else 'Use'
+    full_text_search = get_enum_prop('FullTextSearch', 'fullTextSearch', 'Use')
     X(f'{i}<FullTextSearch>{full_text_search}</FullTextSearch>')
     X(f'{i}<ObjectPresentation/>')
     X(f'{i}<ExtendedObjectPresentation/>')
@@ -964,10 +1041,10 @@ def emit_document_properties(indent):
     X(f'{i}<Comment/>')
     X(f'{i}<UseStandardCommands>true</UseStandardCommands>')
     X(f'{i}<Numerator/>')
-    number_type = str(defn['numberType']) if defn.get('numberType') else 'String'
+    number_type = get_enum_prop('NumberType', 'numberType', 'String')
     number_length = str(defn['numberLength']) if defn.get('numberLength') is not None else '11'
-    number_allowed_length = str(defn['numberAllowedLength']) if defn.get('numberAllowedLength') else 'Variable'
-    number_periodicity = str(defn['numberPeriodicity']) if defn.get('numberPeriodicity') else 'Year'
+    number_allowed_length = get_enum_prop('NumberAllowedLength', 'numberAllowedLength', 'Variable')
+    number_periodicity = get_enum_prop('InformationRegisterPeriodicity', 'numberPeriodicity', 'Year')
     check_unique = 'false' if defn.get('checkUnique') is False else 'true'
     autonumbering = 'false' if defn.get('autonumbering') is False else 'true'
     X(f'{i}<NumberType>{number_type}</NumberType>')
@@ -992,10 +1069,10 @@ def emit_document_properties(indent):
     X(f'{i}<AuxiliaryObjectForm/>')
     X(f'{i}<AuxiliaryListForm/>')
     X(f'{i}<AuxiliaryChoiceForm/>')
-    posting = str(defn['posting']) if defn.get('posting') else 'Allow'
-    real_time_posting = str(defn['realTimePosting']) if defn.get('realTimePosting') else 'Deny'
-    reg_records_deletion = str(defn['registerRecordsDeletion']) if defn.get('registerRecordsDeletion') else 'AutoDelete'
-    reg_records_writing = str(defn['registerRecordsWritingOnPost']) if defn.get('registerRecordsWritingOnPost') else 'WriteModified'
+    posting = get_enum_prop('Posting', 'posting', 'Allow')
+    real_time_posting = get_enum_prop('RealTimePosting', 'realTimePosting', 'Deny')
+    reg_records_deletion = get_enum_prop('RegisterRecordsDeletion', 'registerRecordsDeletion', 'AutoDelete')
+    reg_records_writing = get_enum_prop('RegisterRecordsWritingOnPost', 'registerRecordsWritingOnPost', 'WriteModified')
     sequence_filling = str(defn['sequenceFilling']) if defn.get('sequenceFilling') else 'AutoFill'
     post_in_priv = 'false' if defn.get('postInPrivilegedMode') is False else 'true'
     unpost_in_priv = 'false' if defn.get('unpostInPrivilegedMode') is False else 'true'
@@ -1029,9 +1106,9 @@ def emit_document_properties(indent):
     X(f'{i}<UnpostInPrivilegedMode>{unpost_in_priv}</UnpostInPrivilegedMode>')
     X(f'{i}<IncludeHelpInContents>false</IncludeHelpInContents>')
     X(f'{i}<DataLockFields/>')
-    data_lock_control_mode = str(defn['dataLockControlMode']) if defn.get('dataLockControlMode') else 'Automatic'
+    data_lock_control_mode = get_enum_prop('DataLockControlMode', 'dataLockControlMode', 'Automatic')
     X(f'{i}<DataLockControlMode>{data_lock_control_mode}</DataLockControlMode>')
-    full_text_search = str(defn['fullTextSearch']) if defn.get('fullTextSearch') else 'Use'
+    full_text_search = get_enum_prop('FullTextSearch', 'fullTextSearch', 'Use')
     X(f'{i}<FullTextSearch>{full_text_search}</FullTextSearch>')
     X(f'{i}<ObjectPresentation/>')
     X(f'{i}<ExtendedObjectPresentation/>')
@@ -1092,7 +1169,7 @@ def emit_constant_properties(indent):
     X(f'{i}<ChoiceForm/>')
     X(f'{i}<LinkByType/>')
     X(f'{i}<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>')
-    data_lock_control_mode = str(defn['dataLockControlMode']) if defn.get('dataLockControlMode') else 'Automatic'
+    data_lock_control_mode = get_enum_prop('DataLockControlMode', 'dataLockControlMode', 'Automatic')
     X(f'{i}<DataLockControlMode>{data_lock_control_mode}</DataLockControlMode>')
     X(f'{i}<DataHistory>DontUse</DataHistory>')
     X(f'{i}<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>')
@@ -1110,8 +1187,8 @@ def emit_information_register_properties(indent):
     X(f'{i}<AuxiliaryRecordForm/>')
     X(f'{i}<AuxiliaryListForm/>')
     emit_standard_attributes(i, 'InformationRegister')
-    periodicity = str(defn['periodicity']) if defn.get('periodicity') else 'Nonperiodical'
-    write_mode = str(defn['writeMode']) if defn.get('writeMode') else 'Independent'
+    periodicity = get_enum_prop('InformationRegisterPeriodicity', 'periodicity', 'Nonperiodical')
+    write_mode = get_enum_prop('WriteMode', 'writeMode', 'Independent')
     main_filter_on_period = 'false'
     if defn.get('mainFilterOnPeriod') is not None:
         main_filter_on_period = 'true' if defn['mainFilterOnPeriod'] is True else 'false'
@@ -1121,9 +1198,9 @@ def emit_information_register_properties(indent):
     X(f'{i}<WriteMode>{write_mode}</WriteMode>')
     X(f'{i}<MainFilterOnPeriod>{main_filter_on_period}</MainFilterOnPeriod>')
     X(f'{i}<IncludeHelpInContents>false</IncludeHelpInContents>')
-    data_lock_control_mode = str(defn['dataLockControlMode']) if defn.get('dataLockControlMode') else 'Automatic'
+    data_lock_control_mode = get_enum_prop('DataLockControlMode', 'dataLockControlMode', 'Automatic')
     X(f'{i}<DataLockControlMode>{data_lock_control_mode}</DataLockControlMode>')
-    full_text_search = str(defn['fullTextSearch']) if defn.get('fullTextSearch') else 'Use'
+    full_text_search = get_enum_prop('FullTextSearch', 'fullTextSearch', 'Use')
     X(f'{i}<FullTextSearch>{full_text_search}</FullTextSearch>')
     X(f'{i}<EnableTotalsSliceFirst>false</EnableTotalsSliceFirst>')
     X(f'{i}<EnableTotalsSliceLast>false</EnableTotalsSliceLast>')
@@ -1144,13 +1221,13 @@ def emit_accumulation_register_properties(indent):
     X(f'{i}<UseStandardCommands>true</UseStandardCommands>')
     X(f'{i}<DefaultListForm/>')
     X(f'{i}<AuxiliaryListForm/>')
-    register_type = str(defn['registerType']) if defn.get('registerType') else 'Balance'
+    register_type = get_enum_prop('RegisterType', 'registerType', 'Balance')
     X(f'{i}<RegisterType>{register_type}</RegisterType>')
     X(f'{i}<IncludeHelpInContents>false</IncludeHelpInContents>')
     emit_standard_attributes(i, 'AccumulationRegister')
-    data_lock_control_mode = str(defn['dataLockControlMode']) if defn.get('dataLockControlMode') else 'Automatic'
+    data_lock_control_mode = get_enum_prop('DataLockControlMode', 'dataLockControlMode', 'Automatic')
     X(f'{i}<DataLockControlMode>{data_lock_control_mode}</DataLockControlMode>')
-    full_text_search = str(defn['fullTextSearch']) if defn.get('fullTextSearch') else 'Use'
+    full_text_search = get_enum_prop('FullTextSearch', 'fullTextSearch', 'Use')
     X(f'{i}<FullTextSearch>{full_text_search}</FullTextSearch>')
     enable_totals_splitting = 'false' if defn.get('enableTotalsSplitting') is False else 'true'
     X(f'{i}<EnableTotalsSplitting>{enable_totals_splitting}</EnableTotalsSplitting>')
@@ -1231,7 +1308,7 @@ def emit_common_module_properties(indent):
     X(f'{i}<ClientOrdinaryApplication>{client_ordinary}</ClientOrdinaryApplication>')
     X(f'{i}<ServerCall>{server_call}</ServerCall>')
     X(f'{i}<Privileged>{privileged}</Privileged>')
-    return_values_reuse = str(defn['returnValuesReuse']) if defn.get('returnValuesReuse') else 'DontUse'
+    return_values_reuse = get_enum_prop('ReturnValuesReuse', 'returnValuesReuse', 'DontUse')
     X(f'{i}<ReturnValuesReuse>{return_values_reuse}</ReturnValuesReuse>')
 
 def emit_scheduled_job_properties(indent):
@@ -1353,7 +1430,7 @@ def emit_exchange_plan_properties(indent):
     X(f'{i}<UseStandardCommands>true</UseStandardCommands>')
     code_length = str(defn['codeLength']) if defn.get('codeLength') is not None else '9'
     description_length = str(defn['descriptionLength']) if defn.get('descriptionLength') is not None else '100'
-    code_allowed_length = str(defn['codeAllowedLength']) if defn.get('codeAllowedLength') else 'Variable'
+    code_allowed_length = get_enum_prop('CodeAllowedLength', 'codeAllowedLength', 'Variable')
     X(f'{i}<CodeLength>{code_length}</CodeLength>')
     X(f'{i}<CodeAllowedLength>{code_allowed_length}</CodeAllowedLength>')
     X(f'{i}<DescriptionLength>{description_length}</DescriptionLength>')
@@ -1382,9 +1459,9 @@ def emit_exchange_plan_properties(indent):
     X(f'{i}<AuxiliaryChoiceForm/>')
     X(f'{i}<IncludeHelpInContents>false</IncludeHelpInContents>')
     X(f'{i}<DataLockFields/>')
-    data_lock_control_mode = str(defn['dataLockControlMode']) if defn.get('dataLockControlMode') else 'Automatic'
+    data_lock_control_mode = get_enum_prop('DataLockControlMode', 'dataLockControlMode', 'Automatic')
     X(f'{i}<DataLockControlMode>{data_lock_control_mode}</DataLockControlMode>')
-    full_text_search = str(defn['fullTextSearch']) if defn.get('fullTextSearch') else 'Use'
+    full_text_search = get_enum_prop('FullTextSearch', 'fullTextSearch', 'Use')
     X(f'{i}<FullTextSearch>{full_text_search}</FullTextSearch>')
     X(f'{i}<ObjectPresentation/>')
     X(f'{i}<ExtendedObjectPresentation/>')
@@ -1405,7 +1482,7 @@ def emit_chart_of_characteristic_types_properties(indent):
     X(f'{i}<UseStandardCommands>true</UseStandardCommands>')
     code_length = str(defn['codeLength']) if defn.get('codeLength') is not None else '9'
     description_length = str(defn['descriptionLength']) if defn.get('descriptionLength') is not None else '25'
-    code_allowed_length = str(defn['codeAllowedLength']) if defn.get('codeAllowedLength') else 'Variable'
+    code_allowed_length = get_enum_prop('CodeAllowedLength', 'codeAllowedLength', 'Variable')
     autonumbering = 'false' if defn.get('autonumbering') is False else 'true'
     check_unique = 'true' if defn.get('checkUnique') is True else 'false'
     X(f'{i}<CodeLength>{code_length}</CodeLength>')
@@ -1473,9 +1550,9 @@ def emit_chart_of_characteristic_types_properties(indent):
     X(f'{i}<IncludeHelpInContents>false</IncludeHelpInContents>')
     X(f'{i}<BasedOn/>')
     X(f'{i}<DataLockFields/>')
-    data_lock_control_mode = str(defn['dataLockControlMode']) if defn.get('dataLockControlMode') else 'Automatic'
+    data_lock_control_mode = get_enum_prop('DataLockControlMode', 'dataLockControlMode', 'Automatic')
     X(f'{i}<DataLockControlMode>{data_lock_control_mode}</DataLockControlMode>')
-    full_text_search = str(defn['fullTextSearch']) if defn.get('fullTextSearch') else 'Use'
+    full_text_search = get_enum_prop('FullTextSearch', 'fullTextSearch', 'Use')
     X(f'{i}<FullTextSearch>{full_text_search}</FullTextSearch>')
     X(f'{i}<ObjectPresentation/>')
     X(f'{i}<ExtendedObjectPresentation/>')
@@ -1585,9 +1662,9 @@ def emit_chart_of_accounts_properties(indent):
     X(f'{i}<IncludeHelpInContents>false</IncludeHelpInContents>')
     X(f'{i}<BasedOn/>')
     X(f'{i}<DataLockFields/>')
-    data_lock_control_mode = str(defn['dataLockControlMode']) if defn.get('dataLockControlMode') else 'Automatic'
+    data_lock_control_mode = get_enum_prop('DataLockControlMode', 'dataLockControlMode', 'Automatic')
     X(f'{i}<DataLockControlMode>{data_lock_control_mode}</DataLockControlMode>')
-    full_text_search = str(defn['fullTextSearch']) if defn.get('fullTextSearch') else 'Use'
+    full_text_search = get_enum_prop('FullTextSearch', 'fullTextSearch', 'Use')
     X(f'{i}<FullTextSearch>{full_text_search}</FullTextSearch>')
     X(f'{i}<ObjectPresentation/>')
     X(f'{i}<ExtendedObjectPresentation/>')
@@ -1619,9 +1696,9 @@ def emit_accounting_register_properties(indent):
     X(f'{i}<PeriodAdjustmentLength>{period_adj_len}</PeriodAdjustmentLength>')
     X(f'{i}<IncludeHelpInContents>false</IncludeHelpInContents>')
     emit_standard_attributes(i, 'AccountingRegister')
-    data_lock_control_mode = str(defn['dataLockControlMode']) if defn.get('dataLockControlMode') else 'Automatic'
+    data_lock_control_mode = get_enum_prop('DataLockControlMode', 'dataLockControlMode', 'Automatic')
     X(f'{i}<DataLockControlMode>{data_lock_control_mode}</DataLockControlMode>')
-    full_text_search = str(defn['fullTextSearch']) if defn.get('fullTextSearch') else 'Use'
+    full_text_search = get_enum_prop('FullTextSearch', 'fullTextSearch', 'Use')
     X(f'{i}<FullTextSearch>{full_text_search}</FullTextSearch>')
     X(f'{i}<ListPresentation/>')
     X(f'{i}<ExtendedListPresentation/>')
@@ -1635,14 +1712,14 @@ def emit_chart_of_calculation_types_properties(indent):
     X(f'{i}<UseStandardCommands>true</UseStandardCommands>')
     code_length = str(defn['codeLength']) if defn.get('codeLength') is not None else '9'
     description_length = str(defn['descriptionLength']) if defn.get('descriptionLength') is not None else '25'
-    code_type = str(defn['codeType']) if defn.get('codeType') else 'String'
-    code_allowed_length = str(defn['codeAllowedLength']) if defn.get('codeAllowedLength') else 'Variable'
+    code_type = get_enum_prop('CodeType', 'codeType', 'String')
+    code_allowed_length = get_enum_prop('CodeAllowedLength', 'codeAllowedLength', 'Variable')
     X(f'{i}<CodeLength>{code_length}</CodeLength>')
     X(f'{i}<CodeType>{code_type}</CodeType>')
     X(f'{i}<CodeAllowedLength>{code_allowed_length}</CodeAllowedLength>')
     X(f'{i}<DescriptionLength>{description_length}</DescriptionLength>')
     X(f'{i}<DefaultPresentation>AsDescription</DefaultPresentation>')
-    dependence = str(defn['dependenceOnCalculationTypes']) if defn.get('dependenceOnCalculationTypes') else 'DontUse'
+    dependence = get_enum_prop('DependenceOnCalculationTypes', 'dependenceOnCalculationTypes', 'DontUse')
     X(f'{i}<DependenceOnCalculationTypes>{dependence}</DependenceOnCalculationTypes>')
     base_types = list(defn.get('baseCalculationTypes', []))
     if base_types:
@@ -1676,9 +1753,9 @@ def emit_chart_of_calculation_types_properties(indent):
     X(f'{i}<IncludeHelpInContents>false</IncludeHelpInContents>')
     X(f'{i}<BasedOn/>')
     X(f'{i}<DataLockFields/>')
-    data_lock_control_mode = str(defn['dataLockControlMode']) if defn.get('dataLockControlMode') else 'Automatic'
+    data_lock_control_mode = get_enum_prop('DataLockControlMode', 'dataLockControlMode', 'Automatic')
     X(f'{i}<DataLockControlMode>{data_lock_control_mode}</DataLockControlMode>')
-    full_text_search = str(defn['fullTextSearch']) if defn.get('fullTextSearch') else 'Use'
+    full_text_search = get_enum_prop('FullTextSearch', 'fullTextSearch', 'Use')
     X(f'{i}<FullTextSearch>{full_text_search}</FullTextSearch>')
     X(f'{i}<ObjectPresentation/>')
     X(f'{i}<ExtendedObjectPresentation/>')
@@ -1701,7 +1778,7 @@ def emit_calculation_register_properties(indent):
         X(f'{i}<ChartOfCalculationTypes>{chart_of_calc_types}</ChartOfCalculationTypes>')
     else:
         X(f'{i}<ChartOfCalculationTypes/>')
-    periodicity = str(defn['periodicity']) if defn.get('periodicity') else 'Month'
+    periodicity = get_enum_prop('InformationRegisterPeriodicity', 'periodicity', 'Month')
     X(f'{i}<Periodicity>{periodicity}</Periodicity>')
     action_period = 'true' if defn.get('actionPeriod') is True else 'false'
     X(f'{i}<ActionPeriod>{action_period}</ActionPeriod>')
@@ -1724,9 +1801,9 @@ def emit_calculation_register_properties(indent):
         X(f'{i}<ScheduleDate/>')
     X(f'{i}<IncludeHelpInContents>false</IncludeHelpInContents>')
     emit_standard_attributes(i, 'CalculationRegister')
-    data_lock_control_mode = str(defn['dataLockControlMode']) if defn.get('dataLockControlMode') else 'Automatic'
+    data_lock_control_mode = get_enum_prop('DataLockControlMode', 'dataLockControlMode', 'Automatic')
     X(f'{i}<DataLockControlMode>{data_lock_control_mode}</DataLockControlMode>')
-    full_text_search = str(defn['fullTextSearch']) if defn.get('fullTextSearch') else 'Use'
+    full_text_search = get_enum_prop('FullTextSearch', 'fullTextSearch', 'Use')
     X(f'{i}<FullTextSearch>{full_text_search}</FullTextSearch>')
     X(f'{i}<ListPresentation/>')
     X(f'{i}<ExtendedListPresentation/>')
@@ -1738,11 +1815,11 @@ def emit_business_process_properties(indent):
     emit_mltext(i, 'Synonym', synonym)
     X(f'{i}<Comment/>')
     X(f'{i}<UseStandardCommands>true</UseStandardCommands>')
-    edit_type = str(defn['editType']) if defn.get('editType') else 'InDialog'
+    edit_type = get_enum_prop('EditType', 'editType', 'InDialog')
     X(f'{i}<EditType>{edit_type}</EditType>')
-    number_type = str(defn['numberType']) if defn.get('numberType') else 'String'
+    number_type = get_enum_prop('NumberType', 'numberType', 'String')
     number_length = str(defn['numberLength']) if defn.get('numberLength') is not None else '11'
-    number_allowed_length = str(defn['numberAllowedLength']) if defn.get('numberAllowedLength') else 'Variable'
+    number_allowed_length = get_enum_prop('NumberAllowedLength', 'numberAllowedLength', 'Variable')
     check_unique = 'false' if defn.get('checkUnique') is False else 'true'
     autonumbering = 'false' if defn.get('autonumbering') is False else 'true'
     X(f'{i}<NumberType>{number_type}</NumberType>')
@@ -1773,9 +1850,9 @@ def emit_business_process_properties(indent):
     X(f'{i}<AuxiliaryChoiceForm/>')
     X(f'{i}<IncludeHelpInContents>false</IncludeHelpInContents>')
     X(f'{i}<DataLockFields/>')
-    data_lock_control_mode = str(defn['dataLockControlMode']) if defn.get('dataLockControlMode') else 'Automatic'
+    data_lock_control_mode = get_enum_prop('DataLockControlMode', 'dataLockControlMode', 'Automatic')
     X(f'{i}<DataLockControlMode>{data_lock_control_mode}</DataLockControlMode>')
-    full_text_search = str(defn['fullTextSearch']) if defn.get('fullTextSearch') else 'Use'
+    full_text_search = get_enum_prop('FullTextSearch', 'fullTextSearch', 'Use')
     X(f'{i}<FullTextSearch>{full_text_search}</FullTextSearch>')
     X(f'{i}<ObjectPresentation/>')
     X(f'{i}<ExtendedObjectPresentation/>')
@@ -1793,9 +1870,9 @@ def emit_task_properties(indent):
     emit_mltext(i, 'Synonym', synonym)
     X(f'{i}<Comment/>')
     X(f'{i}<UseStandardCommands>true</UseStandardCommands>')
-    number_type = str(defn['numberType']) if defn.get('numberType') else 'String'
+    number_type = get_enum_prop('NumberType', 'numberType', 'String')
     number_length = str(defn['numberLength']) if defn.get('numberLength') is not None else '14'
-    number_allowed_length = str(defn['numberAllowedLength']) if defn.get('numberAllowedLength') else 'Variable'
+    number_allowed_length = get_enum_prop('NumberAllowedLength', 'numberAllowedLength', 'Variable')
     check_unique = 'false' if defn.get('checkUnique') is False else 'true'
     autonumbering = 'false' if defn.get('autonumbering') is False else 'true'
     task_number_auto_prefix = str(defn['taskNumberAutoPrefix']) if defn.get('taskNumberAutoPrefix') else 'BusinessProcessNumber'
@@ -1840,9 +1917,9 @@ def emit_task_properties(indent):
     X(f'{i}<AuxiliaryChoiceForm/>')
     X(f'{i}<IncludeHelpInContents>false</IncludeHelpInContents>')
     X(f'{i}<DataLockFields/>')
-    data_lock_control_mode = str(defn['dataLockControlMode']) if defn.get('dataLockControlMode') else 'Automatic'
+    data_lock_control_mode = get_enum_prop('DataLockControlMode', 'dataLockControlMode', 'Automatic')
     X(f'{i}<DataLockControlMode>{data_lock_control_mode}</DataLockControlMode>')
-    full_text_search = str(defn['fullTextSearch']) if defn.get('fullTextSearch') else 'Use'
+    full_text_search = get_enum_prop('FullTextSearch', 'fullTextSearch', 'Use')
     X(f'{i}<FullTextSearch>{full_text_search}</FullTextSearch>')
     X(f'{i}<ObjectPresentation/>')
     X(f'{i}<ExtendedObjectPresentation/>')
@@ -1861,7 +1938,7 @@ def emit_http_service_properties(indent):
     X(f'{i}<Comment/>')
     root_url = str(defn['rootURL']) if defn.get('rootURL') else obj_name.lower()
     X(f'{i}<RootURL>{esc_xml(root_url)}</RootURL>')
-    reuse_sessions = str(defn['reuseSessions']) if defn.get('reuseSessions') else 'DontUse'
+    reuse_sessions = get_enum_prop('ReuseSessions', 'reuseSessions', 'DontUse')
     X(f'{i}<ReuseSessions>{reuse_sessions}</ReuseSessions>')
     session_max_age = str(defn['sessionMaxAge']) if defn.get('sessionMaxAge') is not None else '20'
     X(f'{i}<SessionMaxAge>{session_max_age}</SessionMaxAge>')
@@ -1878,7 +1955,7 @@ def emit_web_service_properties(indent):
         X(f'{i}<XDTOPackages>{xdto_packages}</XDTOPackages>')
     else:
         X(f'{i}<XDTOPackages/>')
-    reuse_sessions = str(defn['reuseSessions']) if defn.get('reuseSessions') else 'DontUse'
+    reuse_sessions = get_enum_prop('ReuseSessions', 'reuseSessions', 'DontUse')
     X(f'{i}<ReuseSessions>{reuse_sessions}</ReuseSessions>')
     session_max_age = str(defn['sessionMaxAge']) if defn.get('sessionMaxAge') is not None else '20'
     X(f'{i}<SessionMaxAge>{session_max_age}</SessionMaxAge>')
