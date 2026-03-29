@@ -841,6 +841,29 @@ async function runPool(cases, opts) {
 
 const INTEGRATION = resolve(ROOT, 'integration');
 
+// ─── Platform context (.v8-project.json) ─────────────────────────────────────
+
+function loadV8Context() {
+  const projectFile = join(REPO_ROOT, '.v8-project.json');
+  if (!existsSync(projectFile)) return null;
+  try {
+    const proj = JSON.parse(readFileSync(projectFile, 'utf8'));
+    const v8bin = proj.v8path;
+    const v8exe = v8bin ? (existsSync(join(v8bin, '1cv8.exe')) ? join(v8bin, '1cv8.exe') : null) : null;
+    if (!v8exe) return null;
+    const defaultDb = proj.databases?.find(d => d.id === proj.default) || proj.databases?.[0];
+    return {
+      v8path: v8bin,
+      v8exe,
+      dbPath: defaultDb?.path || '',
+      dbUser: defaultDb?.user || '',
+      dbPassword: defaultDb?.password || '',
+      configSrc: defaultDb?.configSrc || '',
+      databases: proj.databases || [],
+    };
+  } catch { return null; }
+}
+
 async function discoverIntegration(filter) {
   if (!existsSync(INTEGRATION)) return [];
   const results = [];
@@ -850,7 +873,7 @@ async function discoverIntegration(filter) {
     const id = `integration/${testName}`;
     if (filter && !id.startsWith(filter) && !id.includes(filter)) continue;
     const mod = await import(`file://${join(INTEGRATION, file).replace(/\\/g, '/')}`);
-    results.push({ id, name: mod.name || testName, steps: mod.steps || [], file, cache: mod.cache, setup: mod.setup || 'empty-config' });
+    results.push({ id, name: mod.name || testName, steps: mod.steps || [], file, cache: mod.cache, setup: mod.setup || 'empty-config', requiresPlatform: !!mod.requiresPlatform });
   }
   return results;
 }
@@ -860,11 +883,33 @@ async function runIntegrationTest(test, opts) {
   const stepResults = [];
   let workspace = null;
 
+  // Skip platform-dependent tests if platform unavailable
+  if (test.requiresPlatform && !opts.v8ctx) {
+    const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+    return { id: test.id, name: test.name, passed: true, skipped: true, steps: [], elapsed: `${elapsed}s`, errors: [] };
+  }
+
   try {
     // Start from configured fixture or empty workspace
     const fixturePath = test.setup === 'none' ? null : ensureSetup(test.setup, opts.runtime, CASES);
+    if (fixturePath === SKIP) {
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+      return { id: test.id, name: test.name, passed: true, skipped: true, steps: [], elapsed: `${elapsed}s`, errors: [] };
+    }
     workspace = createWorkspace(fixturePath, false);
     const workDir = workspace.path;
+
+    // Platform placeholders
+    const v8 = opts.v8ctx || {};
+    const replacePlaceholders = (s) => s
+      .replace('{workDir}', workDir)
+      .replace('{inputFile}', '')
+      .replace('{v8path}', v8.v8path || '')
+      .replace('{v8exe}', v8.v8exe || '')
+      .replace('{dbPath}', v8.dbPath || '')
+      .replace('{dbUser}', v8.dbUser || '')
+      .replace('{dbPassword}', v8.dbPassword || '')
+      .replace('{configSrc}', v8.configSrc || '');
 
     for (let i = 0; i < test.steps.length; i++) {
       const step = test.steps[i];
@@ -877,15 +922,15 @@ async function runIntegrationTest(test, opts) {
         writeFileSync(inputFile, JSON.stringify(step.input, null, 2), 'utf8');
       }
 
-      // Resolve args: replace {workDir} and {inputFile}
+      // Resolve args: replace placeholders
       const script = resolveScript(step.script, opts.runtime);
       const args = [];
       for (const [flag, value] of Object.entries(step.args || {})) {
         args.push(flag);
         if (value === true) continue; // switch
-        args.push(String(value)
-          .replace('{workDir}', workDir)
-          .replace('{inputFile}', inputFile || ''));
+        let resolved = String(value).replace('{inputFile}', inputFile || '');
+        resolved = replacePlaceholders(resolved);
+        args.push(resolved);
       }
 
       // Execute
@@ -894,7 +939,7 @@ async function runIntegrationTest(test, opts) {
         stdout = await execSkillAsync(opts.runtime, script, args);
       } catch (e) {
         const detail = e.stderr?.trim() || e.stdout?.trim() || e.message;
-        stepResults.push({ name: step.name, passed: false, error: `Step ${i + 1} failed: ${detail.substring(0, 500)}` });
+        stepResults.push({ name: step.name, passed: false, error: `Step ${i + 1} failed: ${detail.substring(0, 1000)}` });
         break; // stop on first failure
       }
 
@@ -942,8 +987,9 @@ async function runIntegrationTest(test, opts) {
 function printIntegrationReport(results, opts) {
   console.log('');
   for (const r of results) {
-    const icon = r.passed ? '\u2713' : '\u2717';
-    console.log(`  ${icon} ${r.name} (${r.elapsed})  ${r.id}`);
+    const icon = r.skipped ? '\u25CB' : r.passed ? '\u2713' : '\u2717';
+    const suffix = r.skipped ? ' [skipped — no platform]' : '';
+    console.log(`  ${icon} ${r.name} (${r.elapsed})  ${r.id}${suffix}`);
     for (const step of r.steps) {
       const sIcon = step.passed ? '\u2713' : '\u2717';
       console.log(`    ${sIcon} ${step.name}${step.elapsed ? ` (${step.elapsed})` : ''}`);
@@ -967,6 +1013,9 @@ function printIntegrationReport(results, opts) {
 async function main() {
   const opts = parseArgs(process.argv);
   mkdirSync(CACHE, { recursive: true });
+
+  // Load platform context for platform-dependent tests
+  opts.v8ctx = loadV8Context();
 
   const isIntegrationFilter = opts.filter && opts.filter.startsWith('integration');
 
