@@ -1627,6 +1627,10 @@ async function fillReferenceField(selector, fieldName, value, formNum) {
         // No match in DLB dropdown — close and fall through to paste approach
         await page.keyboard.press('Escape');
         await page.waitForTimeout(300);
+      } else if (eddState.visible) {
+        // DLB opened a hint popup (no .eddText items) — close it before proceeding
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(300);
       }
     }
   } catch { /* DLB approach failed — fall through to paste */ }
