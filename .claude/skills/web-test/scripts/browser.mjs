@@ -2063,17 +2063,16 @@ export async function clickElement(text, { dblclick, table, toggle, expand, modi
         const grid = gridSel ? document.querySelector(gridSel) : document.querySelector('[id^="' + p + '"].grid');
         const body = grid?.querySelector('.gridBody');
         if (!body) return null;
+        const targetY = ${target.y};
         const lines = [...body.querySelectorAll('.gridLine')];
         for (const line of lines) {
-          const textBoxes = [...line.querySelectorAll('.gridBoxText')].filter(b => b.offsetWidth > 0);
-          const text = textBoxes[0]?.innerText?.trim() || '';
-          if (text.toLowerCase().replace(/ё/gi, 'е') === ${JSON.stringify(target.name.toLowerCase().replace(/ё/gi, 'е'))}) {
-            const icon = line.querySelector('.gridListH, .gridListV');
-            if (icon) {
-              const r = icon.getBoundingClientRect();
-              const isExpanded = !!icon.classList.contains('gridListV');
-              return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), isExpanded };
-            }
+          const lr = line.getBoundingClientRect();
+          if (targetY < lr.top || targetY > lr.bottom) continue;
+          const icon = line.querySelector('.gridListH, .gridListV');
+          if (icon) {
+            const r = icon.getBoundingClientRect();
+            const isExpanded = !!icon.classList.contains('gridListV');
+            return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), isExpanded };
           }
         }
         return null;
@@ -2112,18 +2111,17 @@ export async function clickElement(text, { dblclick, table, toggle, expand, modi
         const grid = gridSel ? document.querySelector(gridSel) : document.querySelector('[id^="' + p + '"].grid');
         const body = grid?.querySelector('.gridBody');
         if (!body) return null;
+        const targetY = ${target.y};
         const lines = [...body.querySelectorAll('.gridLine')];
         for (const line of lines) {
-          const textBoxes = [...line.querySelectorAll('.gridBoxText')].filter(b => b.offsetWidth > 0);
-          const text = textBoxes[0]?.innerText?.trim() || '';
-          if (text.toLowerCase().replace(/ё/gi, 'е') === ${JSON.stringify(target.name.toLowerCase().replace(/ё/gi, 'е'))}) {
-            const treeIcon = line.querySelector('.gridBoxImg [tree="true"]');
-            if (treeIcon) {
-              const r = treeIcon.getBoundingClientRect();
-              const bg = treeIcon.style.backgroundImage || '';
-              const isExpanded = bg.includes('gx=0');
-              return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), isExpanded };
-            }
+          const lr = line.getBoundingClientRect();
+          if (targetY < lr.top || targetY > lr.bottom) continue;
+          const treeIcon = line.querySelector('.gridBoxImg [tree="true"]');
+          if (treeIcon) {
+            const r = treeIcon.getBoundingClientRect();
+            const bg = treeIcon.style.backgroundImage || '';
+            const isExpanded = bg.includes('gx=0');
+            return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), isExpanded };
           }
         }
         return null;
