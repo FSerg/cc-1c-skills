@@ -964,20 +964,14 @@ export async function readTable({ maxRows = 20, offset = 0, table } = {}) {
   return await page.evaluate(readTableScript(formNum, { maxRows, offset, gridSelector }));
 }
 
-/**
- * Read report output (SpreadsheetDocumentField) rendered in iframes.
- * 1C renders spreadsheet documents as absolutely-positioned div cells inside iframes.
- * Each cell is a div[x] inside a row div[y], text content in <span>.
- *
- * Returns structured data:
- *   { title, headers, data: [{col: val}], totals: {col: val}, total }
- * If header detection fails, falls back to { rows: string[][], total }.
- */
-export async function readSpreadsheet() {
-  ensureConnected();
-  const formNum = await page.evaluate(detectFormScript());
+// --- Spreadsheet helpers (shared by readSpreadsheet and clickElement) ---
 
-  // Collect iframe indices that belong to the current form's spreadsheet container
+/**
+ * Scan spreadsheet iframes for the current form and collect all cells.
+ * Returns { allCells: Map<'r_c', {r,c,t}>, frameMap: Map<'r_c', frameIndex> }
+ * where frameIndex is the Playwright frames[] index (1-based, 0 = main).
+ */
+async function scanSpreadsheetCells(formNum) {
   const iframeIndices = await page.evaluate(`(() => {
     const prefix = 'form${formNum ?? 0}_';
     const allIframes = [...document.querySelectorAll('iframe')];
@@ -996,11 +990,11 @@ export async function readSpreadsheet() {
 
   const frames = page.frames();
   const allCells = new Map();
+  const frameMap = new Map(); // key 'r_c' → Playwright frame index
 
-  // Map page iframe indices to frame objects (frame 0 = main, iframes start at 1+)
   for (const iframeIdx of iframeIndices) {
-    // Playwright frames: frame[0] is main, frame[1..N] map to iframes in DOM order
-    const frame = frames[iframeIdx + 1];
+    const frameIndex = iframeIdx + 1;
+    const frame = frames[frameIndex];
     if (!frame) continue;
     try {
       const cells = await frame.evaluate(`(() => {
@@ -1020,14 +1014,20 @@ export async function readSpreadsheet() {
         const key = `${cell.r}_${cell.c}`;
         if (!allCells.has(key) || cell.t.length > allCells.get(key).t.length) {
           allCells.set(key, cell);
+          frameMap.set(key, frameIndex);
         }
       }
     } catch { /* skip inaccessible frames */ }
   }
+  return { allCells, frameMap };
+}
 
-  if (allCells.size === 0) throw new Error('readSpreadsheet: no SpreadsheetDocument found. Report may not be generated yet.');
-
-  // Group by row, determine max columns
+/**
+ * Build structured mapping from raw cells: headers, column map, data/totals row indices.
+ * Returns { rows, sortedRows, maxCol, colNames, headerRowIdx, dataStartIdx, totalsRowIdx, rowMap }
+ * or null if header detection fails.
+ */
+function buildSpreadsheetMapping(allCells) {
   const rowMap = new Map();
   let maxCol = 0;
   for (const cell of allCells.values()) {
@@ -1038,38 +1038,35 @@ export async function readSpreadsheet() {
 
   const sortedRows = [...rowMap.keys()].sort((a, b) => a - b);
   const rows = sortedRows.map(r => {
-    const colMap = rowMap.get(r);
+    const cm = rowMap.get(r);
     const arr = [];
-    for (let c = 0; c <= maxCol; c++) arr.push(colMap.get(c) || '');
+    for (let c = 0; c <= maxCol; c++) arr.push(cm.get(c) || '');
     return arr;
   });
 
-  // --- Structured parsing ---
   const hasNumber = (row) => row.some(c => /^[\d\s\u00a0]/.test(c) && /\d/.test(c));
   const nonEmpty = (row) => row.filter(c => c !== '').length;
 
-  // 1. Find first data row (first row with numbers)
+  // Find first data row (first row with numbers)
   let firstDataIdx = rows.length;
   for (let i = 0; i < rows.length; i++) {
     if (hasNumber(rows[i])) { firstDataIdx = i; break; }
   }
 
-  // 2. Find header rows: scan backwards from data, pick last row with ≥3 cells as detail header
+  // Find header rows
   let detailIdx = -1;
   for (let i = firstDataIdx - 1; i >= 0; i--) {
     if (nonEmpty(rows[i]) >= 3) { detailIdx = i; break; }
   }
-  if (detailIdx === -1) return { rows, total: rows.length };
+  if (detailIdx === -1) return null; // no headers detected
 
-  // Group header: row before detail with ≥2 non-empty cells
   let groupIdx = -1;
   if (detailIdx > 0 && nonEmpty(rows[detailIdx - 1]) >= 2) groupIdx = detailIdx - 1;
 
   const detailRow = rows[detailIdx];
   const groupRow = groupIdx >= 0 ? rows[groupIdx] : null;
 
-  // 3. Build column names by merging group + detail rows
-  //    Fill-forward group names across empty columns (merged cells)
+  // Build column names (group + detail merge)
   const groupFilled = new Array(maxCol + 1).fill('');
   if (groupRow) {
     let cur = '';
@@ -1079,8 +1076,6 @@ export async function readSpreadsheet() {
     }
   }
 
-  // For each column: use detail name if available, else group name
-  // Prefix with group when duplicates exist in detail row
   const detailCounts = {};
   for (let c = 0; c <= maxCol; c++) {
     const n = detailRow[c];
@@ -1092,7 +1087,6 @@ export async function readSpreadsheet() {
     const detail = detailRow[c];
     const group = groupFilled[c];
     if (detail) {
-      // Use group prefix if duplicate detail names or if group differs from detail
       const needPrefix = group && group !== detail && (detailCounts[detail] > 1 || (groupRow && groupRow[c] === ''));
       colNames.push(needPrefix ? `${group} / ${detail}` : detail);
     } else if (group) {
@@ -1102,10 +1096,192 @@ export async function readSpreadsheet() {
     }
   }
 
-  // 4. Data starts at firstDataIdx
-  const dataStart = firstDataIdx;
+  // Column name → physical column index
+  const colMap = new Map();
+  for (let c = 0; c < colNames.length; c++) {
+    if (colNames[c]) colMap.set(colNames[c], c);
+  }
 
-  // 5. Convert data rows to objects
+  // Classify data rows: separate data indices and totals index
+  const dataRowIndices = []; // indices into rows[] array
+  let totalsRowIdx = -1;
+  for (let i = firstDataIdx; i < rows.length; i++) {
+    if (!hasNumber(rows[i]) && nonEmpty(rows[i]) === 0) continue;
+    const first = rows[i][0]?.trim().toLowerCase();
+    if (first === 'итого' || first === 'всего') {
+      totalsRowIdx = i;
+    } else {
+      dataRowIndices.push(i);
+    }
+  }
+
+  return {
+    rows, sortedRows, maxCol, colNames, colMap,
+    headerRowIdx: detailIdx, groupRowIdx: groupIdx,
+    dataStartIdx: firstDataIdx, dataRowIndices, totalsRowIdx,
+    rowMap, hasNumber, nonEmpty,
+  };
+}
+
+/**
+ * Click a cell in SpreadsheetDocument by logical coordinates.
+ * target: { row: number|'totals'|{colName: value}, column: string }
+ * Internal helper — called from clickElement when first arg is an object.
+ */
+async function clickSpreadsheetCell(target, { dblclick: dbl, modifier } = {}) {
+  ensureConnected();
+  const formNum = await page.evaluate(detectFormScript());
+  const { allCells, frameMap } = await scanSpreadsheetCells(formNum);
+  if (allCells.size === 0) throw new Error('clickElement: no SpreadsheetDocument found on current form.');
+
+  const mapping = buildSpreadsheetMapping(allCells);
+  if (!mapping) throw new Error('clickElement: could not detect spreadsheet headers. Use readSpreadsheet() to check report structure.');
+
+  const { rows, sortedRows, colNames, colMap, dataRowIndices, totalsRowIdx } = mapping;
+
+  // Resolve column
+  const colName = target.column;
+  if (!colMap.has(colName)) {
+    const available = colNames.filter(n => n);
+    throw new Error(`clickElement: column "${colName}" not found. Available: ${available.join(', ')}`);
+  }
+  const physCol = colMap.get(colName);
+
+  // Resolve row → index into rows[] array
+  let rowIdx;
+  const row = target.row;
+  if (row === 'totals') {
+    if (totalsRowIdx === -1) throw new Error('clickElement: no totals row found in spreadsheet.');
+    rowIdx = totalsRowIdx;
+  } else if (typeof row === 'number') {
+    if (row < 0 || row >= dataRowIndices.length) throw new Error(`clickElement: row index ${row} out of range (0..${dataRowIndices.length - 1}).`);
+    rowIdx = dataRowIndices[row];
+  } else if (typeof row === 'object') {
+    // Filter: { colName: value } — find first data row where column matches
+    const filterEntries = Object.entries(row);
+    const norm = s => s?.replace(/\u00a0/g, ' ').trim().toLowerCase() || '';
+    rowIdx = dataRowIndices.find(i => {
+      return filterEntries.every(([fCol, fVal]) => {
+        const fColIdx = colMap.get(fCol);
+        if (fColIdx == null) return false;
+        const cellText = norm(rows[i][fColIdx]);
+        const search = norm(fVal);
+        return cellText === search || cellText.includes(search);
+      });
+    });
+    if (rowIdx == null) throw new Error(`clickElement: no row matching ${JSON.stringify(row)} found in spreadsheet data.`);
+  } else {
+    throw new Error('clickElement: row must be a number, "totals", or { colName: value } filter object.');
+  }
+
+  // Map rows[] index → physical row number
+  const physRow = sortedRows[rowIdx];
+  const cellKey = `${physRow}_${physCol}`;
+  const frameIndex = frameMap.get(cellKey);
+  if (!frameIndex) {
+    // Cell exists in mapping but might be empty — try clicking anyway
+    throw new Error(`clickElement: cell at row=${JSON.stringify(target.row)}, column="${colName}" is empty or not rendered.`);
+  }
+
+  // Get bounding box and click via page.mouse (bypasses mxlCurrBody overlay)
+  const frame = page.frames()[frameIndex];
+  const cellLoc = frame.locator(`div[x="${physCol}"]`).filter({ has: frame.locator(`xpath=ancestor::div[@y="${physRow}" or contains(@class,"R${physRow}")]`) });
+  // Simpler: find by CSS class RxCy
+  const cellDiv = frame.locator(`div.R${physRow}C${physCol}`).first();
+  const box = await cellDiv.boundingBox();
+  if (!box) throw new Error(`clickElement: cell R${physRow}C${physCol} not visible (no bounding box).`);
+
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  const modKey = modifier === 'ctrl' ? 'Control' : modifier === 'shift' ? 'Shift' : null;
+  if (modKey) await page.keyboard.down(modKey);
+  if (dbl) {
+    await page.mouse.dblclick(x, y);
+  } else {
+    await page.mouse.click(x, y);
+  }
+  if (modKey) await page.keyboard.up(modKey);
+
+  await waitForStable();
+  const state = await getFormState();
+  state.clicked = { kind: 'spreadsheetCell', row: target.row, column: colName, ...(dbl ? { dblclick: true } : {}) };
+  return state;
+}
+
+/**
+ * Search spreadsheet iframes for a cell matching text (for text fallback in clickElement).
+ * Returns { frameIndex, physRow, physCol, box } or null if not found.
+ */
+async function findSpreadsheetCellByText(formNum, searchText) {
+  const { allCells, frameMap } = await scanSpreadsheetCells(formNum);
+  if (allCells.size === 0) return null;
+
+  const norm = s => s?.replace(/\u00a0/g, ' ').trim().toLowerCase() || '';
+  const target = norm(searchText);
+
+  // Exact match first, then includes
+  let found = null;
+  for (const [key, cell] of allCells) {
+    if (norm(cell.t) === target) { found = { key, cell }; break; }
+  }
+  if (!found) {
+    for (const [key, cell] of allCells) {
+      if (norm(cell.t).includes(target)) { found = { key, cell }; break; }
+    }
+  }
+  if (!found) return null;
+
+  const frameIndex = frameMap.get(found.key);
+  if (!frameIndex) return null;
+
+  const frame = page.frames()[frameIndex];
+  const cellDiv = frame.locator(`div.R${found.cell.r}C${found.cell.c}`).first();
+  const box = await cellDiv.boundingBox();
+  if (!box) return null;
+
+  return { frameIndex, physRow: found.cell.r, physCol: found.cell.c, text: found.cell.t, box };
+}
+
+/**
+ * Read report output (SpreadsheetDocumentField) rendered in iframes.
+ * 1C renders spreadsheet documents as absolutely-positioned div cells inside iframes.
+ * Each cell is a div[x] inside a row div[y], text content in <span>.
+ *
+ * Returns structured data:
+ *   { title, headers, data: [{col: val}], totals: {col: val}, total }
+ * If header detection fails, falls back to { rows: string[][], total }.
+ */
+export async function readSpreadsheet() {
+  ensureConnected();
+  const formNum = await page.evaluate(detectFormScript());
+
+  const { allCells } = await scanSpreadsheetCells(formNum);
+
+  if (allCells.size === 0) throw new Error('readSpreadsheet: no SpreadsheetDocument found. Report may not be generated yet.');
+
+  const mapping = buildSpreadsheetMapping(allCells);
+  if (!mapping) {
+    // Fallback: return raw rows
+    const rowMap = new Map();
+    let maxCol = 0;
+    for (const cell of allCells.values()) {
+      if (!rowMap.has(cell.r)) rowMap.set(cell.r, new Map());
+      rowMap.get(cell.r).set(cell.c, cell.t);
+      if (cell.c > maxCol) maxCol = cell.c;
+    }
+    const sortedRows = [...rowMap.keys()].sort((a, b) => a - b);
+    const rows = sortedRows.map(r => {
+      const cm = rowMap.get(r);
+      const arr = [];
+      for (let c = 0; c <= maxCol; c++) arr.push(cm.get(c) || '');
+      return arr;
+    });
+    return { rows, total: rows.length };
+  }
+
+  const { rows, colNames, dataStartIdx, maxCol, groupRowIdx, headerRowIdx, hasNumber, nonEmpty } = mapping;
+
+  // Convert data rows to objects
   const data = [];
   let totals = null;
   const toObj = (row) => {
@@ -1116,7 +1292,7 @@ export async function readSpreadsheet() {
     return obj;
   };
 
-  for (let i = dataStart; i < rows.length; i++) {
+  for (let i = dataStartIdx; i < rows.length; i++) {
     if (!hasNumber(rows[i]) && nonEmpty(rows[i]) === 0) continue;
     const first = rows[i][0]?.trim().toLowerCase();
     if (first === 'итого' || first === 'всего') {
@@ -1126,8 +1302,8 @@ export async function readSpreadsheet() {
     }
   }
 
-  // 6. Meta: title, params, filters from rows before header
-  const metaEnd = groupIdx >= 0 ? groupIdx : detailIdx;
+  // Meta: title, params, filters from rows before header
+  const metaEnd = groupRowIdx >= 0 ? groupRowIdx : headerRowIdx;
   let title = '';
   const meta = [];
   for (let i = 0; i < metaEnd; i++) {
@@ -1931,9 +2107,15 @@ export async function fillField(name, value) {
   return fillFields({ [name]: value });
 }
 
-/** Click a button/hyperlink/tab on the current form. Use {dblclick: true} to double-click (open items from lists). */
+/** Click a button/hyperlink/tab on the current form. Use {dblclick: true} to double-click (open items from lists).
+ *  First argument can also be an object { row, column } to click a SpreadsheetDocument cell. */
 export async function clickElement(text, { dblclick, table, toggle, expand, modifier, timeout } = {}) {
   ensureConnected();
+  // Dispatch to spreadsheet cell handler when first arg is { row, column }
+  if (typeof text === 'object' && text !== null && text.column != null) {
+    await dismissPendingErrors();
+    return clickSpreadsheetCell(text, { dblclick, modifier });
+  }
   await dismissPendingErrors();
   if (highlightMode) try { await highlight(text, { table }); await page.waitForTimeout(500); await unhighlight(); } catch {}
   let netMonitor = null;
@@ -2037,7 +2219,24 @@ export async function clickElement(text, { dblclick, table, toggle, expand, modi
       }
     }
   }
-  if (target?.error) throw new Error(`clickElement: "${text}" not found. Available: ${target.available?.join(', ') || 'none'}`);
+  // Fallback: search spreadsheet iframes for text match before giving up
+  if (target?.error) {
+    const ssCell = await findSpreadsheetCellByText(formNum, text);
+    if (ssCell) {
+      const cx = ssCell.box.x + ssCell.box.width / 2;
+      const cy = ssCell.box.y + ssCell.box.height / 2;
+      const modKey = modifier === 'ctrl' ? 'Control' : modifier === 'shift' ? 'Shift' : null;
+      if (modKey) await page.keyboard.down(modKey);
+      if (dblclick) await page.mouse.dblclick(cx, cy);
+      else await page.mouse.click(cx, cy);
+      if (modKey) await page.keyboard.up(modKey);
+      await waitForStable();
+      const state = await getFormState();
+      state.clicked = { kind: 'spreadsheetCell', name: ssCell.text, ...(dblclick ? { dblclick: true } : {}) };
+      return state;
+    }
+    throw new Error(`clickElement: "${text}" not found. Available: ${target.available?.join(', ') || 'none'}`);
+  }
 
   // Helper: click with optional modifier key (Ctrl/Shift for multi-select)
   const modKey = modifier === 'ctrl' ? 'Control' : modifier === 'shift' ? 'Shift' : null;

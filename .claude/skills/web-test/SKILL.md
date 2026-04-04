@@ -240,6 +240,24 @@ Click button, hyperlink, tab, navigation panel link, or grid row (fuzzy match).
   const t = await readTable();
   t.rows.filter(r => r._selected);  // rows with _selected: true
   ```
+- **SpreadsheetDocument cells** (report drill-down): first argument can be `{ row, column }` object to click a cell in a rendered report. Coordinates match `readSpreadsheet()` output:
+  ```js
+  const report = await readSpreadsheet();
+  // report.data[0] = { 'К1': 'Материалы строительные', 'К6': '150 000', ... }
+
+  // By data row index + column header name
+  await clickElement({ row: 0, column: 'К6' }, { dblclick: true });
+
+  // By cell value filter (fuzzy match)
+  await clickElement({ row: { 'К1': 'Материалы' }, column: 'К6' }, { dblclick: true });
+
+  // Totals row
+  await clickElement({ row: 'totals', column: 'К6' }, { dblclick: true });
+  ```
+  Text search also works as fallback — searches inside spreadsheet iframes:
+  ```js
+  await clickElement('150 000', { dblclick: true }); // finds cell by text in report
+  ```
 
 #### `fillFields({ name: value })` → `{ filled, form }`
 Fill form fields by label (fuzzy match). Auto-detects field type.
@@ -408,6 +426,23 @@ await wait(5);
 const report = await readSpreadsheet();
 console.log('Title:', report.title);
 console.log('Data rows:', report.data?.length);
+```
+
+### Drill-down report cells
+
+```js
+// Generate report
+await clickElement('Сформировать');
+await wait(5);
+const report = await readSpreadsheet();
+
+// Double-click cell to open drill-down (uses coordinates from readSpreadsheet)
+await clickElement({ row: 0, column: 'К6' }, { dblclick: true });
+// Modal dialog "Выбор поля" opens
+await clickElement('Регистратор');
+await clickElement('Выбрать');
+await wait(10);
+const drilldown = await readSpreadsheet();
 ```
 
 ### Work with multi-grid forms

@@ -189,6 +189,27 @@ await closeForm({ save: false });
 
 Запуск: `node $RUN run http://localhost:8081/erp scenario-compare-stocks.js`
 
+### Расшифровка отчёта
+
+```js
+// 1. Сформировать отчёт
+await clickElement('Сформировать');
+await wait(5);
+const report = await readSpreadsheet();
+
+// 2. Двойной клик по ячейке → диалог "Выбор поля"
+await clickElement({ row: 0, column: 'К6' }, { dblclick: true });
+
+// 3. Выбрать поле расшифровки
+await clickElement('Регистратор');
+await clickElement('Выбрать');
+await wait(10);
+
+// 4. Прочитать результат
+const drilldown = await readSpreadsheet();
+console.log('Расшифровка:', JSON.stringify(drilldown.rows));
+```
+
 ## API
 
 Все функции доступны как глобальные переменные в скриптах. `console.log()` выводит данные в ответ.
@@ -239,11 +260,35 @@ await closeForm({ save: false });
 - `_selected: true` — строка выделена (подсвечена). Используйте с `clickElement({ modifier: 'ctrl'|'shift' })` для проверки мультиселекции
 - На объекте результата: `hierarchical: true`, `viewMode: 'tree'`
 
+#### clickElement — клик по ячейке SpreadsheetDocument
+
+Для расшифровки отчётов первый аргумент `clickElement` принимает объект `{ row, column }` вместо текста. Координаты соответствуют выводу `readSpreadsheet()`:
+
+```js
+const report = await readSpreadsheet();
+// report.data[0] = { 'К1': 'Материалы строительные', 'К6': '150 000' }
+
+// По индексу строки данных + имя колонки
+await clickElement({ row: 0, column: 'К6' }, { dblclick: true });
+
+// По значению ячейки в строке (fuzzy match)
+await clickElement({ row: { 'К1': 'Материалы' }, column: 'К6' }, { dblclick: true });
+
+// Строка итогов
+await clickElement({ row: 'totals', column: 'К6' }, { dblclick: true });
+```
+
+Текстовый поиск тоже работает — если элемент не найден в основном DOM, `clickElement` ищет в SpreadsheetDocument iframe'ах:
+
+```js
+await clickElement('150 000', { dblclick: true }); // найдёт ячейку в отчёте
+```
+
 ### Действия
 
 | Функция | Описание | Возвращает |
 |---------|----------|------------|
-| `clickElement(text, {dblclick?, modifier?})` | Клик по кнопке/ссылке/строке. `{dblclick: true}` для открытия, `{modifier: 'ctrl'\|'shift'}` для мультиселекции | form state или `{ submenu }` |
+| `clickElement(text, {dblclick?, modifier?})` | Клик по кнопке/ссылке/строке. `{dblclick: true}` для открытия, `{modifier: 'ctrl'\|'shift'}` для мультиселекции. Первый аргумент может быть `{row, column}` для клика по ячейке SpreadsheetDocument (см. выше) | form state или `{ submenu }` |
 | `fillFields({name: value})` | Заполнить поля (текст, чекбокс, радио, ссылки, DCS-фильтры). Пустое значение (`''`/`null`) = очистка | `{ filled: [{field, ok, method}], form }` |
 | `selectValue(field, search, opts?)` | Выбрать из справочника. search: текст, `{поле: значение}` или `''`/`null` для очистки. `{ type }` для составного типа | form state с `selected` |
 | `fillTableRow(fields, {tab?, add?, row?})` | Заполнить строку. Значение: строка, `{ value, type }` для составного типа, `''`/`null` для очистки | form state |
