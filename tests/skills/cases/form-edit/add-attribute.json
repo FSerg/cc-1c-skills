@@ -14,7 +14,7 @@
       "script": "form-compile/scripts/form-compile",
       "input": {
         "title": "Реквизиты",
-        "attributes": [{ "name": "Объект", "type": "ExternalDataProcessorObject.Реквизиты", "main": true }]
+        "attributes": [{ "name": "Объект", "type": "DataProcessorObject.Реквизиты", "main": true }]
       },
       "args": { "-JsonPath": "{inputFile}", "-OutputPath": "{workDir}/DataProcessors/Реквизиты/Forms/Форма/Ext/Form.xml" }
     }

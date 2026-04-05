@@ -22,7 +22,7 @@
       { "label": "Подсказка", "title": "Нажмите для перехода", "hyperlink": true, "on": ["Click"] }
     ],
     "attributes": [
-      { "name": "Объект", "type": "ExternalDataProcessorObject.События", "main": true },
+      { "name": "Объект", "type": "DataProcessorObject.События", "main": true },
       { "name": "Организация", "type": "string" },
       { "name": "Период", "type": "date" }
     ]

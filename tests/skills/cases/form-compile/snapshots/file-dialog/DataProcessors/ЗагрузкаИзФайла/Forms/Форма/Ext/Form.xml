@@ -79,7 +79,7 @@
 	<Attributes>
 		<Attribute name="Объект" id="18">
 			<Type>
-				<v8:Type>cfg:ExternalDataProcessorObject.ЗагрузкаИзФайла</v8:Type>
+				<v8:Type>cfg:DataProcessorObject.ЗагрузкаИзФайла</v8:Type>
 			</Type>
 			<MainAttribute>true</MainAttribute>
 		</Attribute>

@@ -5,7 +5,9 @@
       "script": "meta-compile/scripts/meta-compile",
       "input": {
         "type": "InformationRegister",
-        "name": "Цены"
+        "name": "Цены",
+        "dimensions": ["Номенклатура: String(100)"],
+        "resources": ["Цена: Number(15,2)"]
       },
       "args": {
         "-JsonPath": "{inputFile}",

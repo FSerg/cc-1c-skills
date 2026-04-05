@@ -37,7 +37,7 @@
 	<Attributes>
 		<Attribute name="Объект" id="4">
 			<Type>
-				<v8:Type>cfg:ExternalDataProcessorObject.Тест</v8:Type>
+				<v8:Type>cfg:DataProcessorObject.Тест</v8:Type>
 			</Type>
 			<MainAttribute>true</MainAttribute>
 		</Attribute>

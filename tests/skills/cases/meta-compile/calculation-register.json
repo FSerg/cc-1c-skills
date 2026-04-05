@@ -5,8 +5,6 @@
     "name": "Начисления",
     "chartOfCalculationTypes": "ChartOfCalculationTypes.ВидыНачислений",
     "periodicity": "Month",
-    "actionPeriod": true,
-    "basePeriod": true,
     "dimensions": ["Сотрудник: CatalogRef.Сотрудники"],
     "resources": ["Результат: Number(15,2)", "ОтработаноДней: Number(5,0)"]
   },

@@ -14,7 +14,7 @@
       "script": "form-compile/scripts/form-compile",
       "input": {
         "title": "Команды",
-        "attributes": [{ "name": "Объект", "type": "ExternalDataProcessorObject.КомандыТест", "main": true }]
+        "attributes": [{ "name": "Объект", "type": "DataProcessorObject.КомандыТест", "main": true }]
       },
       "args": { "-JsonPath": "{inputFile}", "-OutputPath": "{workDir}/DataProcessors/КомандыТест/Forms/Форма/Ext/Form.xml" }
     }

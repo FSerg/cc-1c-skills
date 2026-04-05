@@ -60,7 +60,7 @@
 	<Attributes>
 		<Attribute name="Объект" id="4">
 			<Type>
-				<v8:Type>cfg:ExternalDataProcessorObject.Группа</v8:Type>
+				<v8:Type>cfg:DataProcessorObject.Группа</v8:Type>
 			</Type>
 			<MainAttribute>true</MainAttribute>
 		</Attribute>

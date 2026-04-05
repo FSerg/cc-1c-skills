@@ -24,7 +24,7 @@
       { "check": "Флаг", "path": "Флаг", "title": "Включено" }
     ],
     "attributes": [
-      { "name": "Объект", "type": "ExternalDataProcessorObject.ПоляВвода", "main": true },
+      { "name": "Объект", "type": "DataProcessorObject.ПоляВвода", "main": true },
       { "name": "ОбычноеПоле", "type": "string(100)" },
       { "name": "МногострочноеПоле", "type": "string" },
       { "name": "ПолеПароля", "type": "string(50)" },

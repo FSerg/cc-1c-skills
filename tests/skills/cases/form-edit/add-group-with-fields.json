@@ -14,7 +14,7 @@
       "script": "form-compile/scripts/form-compile",
       "input": {
         "title": "Группа",
-        "attributes": [{ "name": "Объект", "type": "ExternalDataProcessorObject.Группа", "main": true }],
+        "attributes": [{ "name": "Объект", "type": "DataProcessorObject.Группа", "main": true }],
         "elements": [
           { "input": "Поле1", "path": "Поле1", "title": "Существующее поле" }
         ]

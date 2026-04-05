@@ -5,9 +5,8 @@
     "name": "Хозрасчетный",
     "codeLength": 4,
     "descriptionLength": 120,
-    "maxExtDimensionCount": 3,
-    "accountingFlags": ["Валютный", "Количественный"],
-    "extDimensionAccountingFlags": ["СуммовойУчет"]
+    "maxExtDimensionCount": 0,
+    "accountingFlags": ["Валютный", "Количественный"]
   },
   "validatePath": "ChartsOfAccounts/Хозрасчетный",
   "expect": {

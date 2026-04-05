@@ -91,7 +91,7 @@
 	<Attributes>
 		<Attribute name="Объект" id="19">
 			<Type>
-				<v8:Type>cfg:ExternalDataProcessorObject.ПоляВвода</v8:Type>
+				<v8:Type>cfg:DataProcessorObject.ПоляВвода</v8:Type>
 			</Type>
 			<MainAttribute>true</MainAttribute>
 		</Attribute>

@@ -22,7 +22,7 @@
       { "input": "Булево", "path": "Булево" }
     ],
     "attributes": [
-      { "name": "Объект", "type": "ExternalDataProcessorObject.Типы", "main": true },
+      { "name": "Объект", "type": "DataProcessorObject.Типы", "main": true },
       { "name": "Строка", "type": "string(200)" },
       { "name": "Число", "type": "decimal(10,0,nonneg)" },
       { "name": "Дата", "type": "dateTime" },

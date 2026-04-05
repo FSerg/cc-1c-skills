@@ -3,7 +3,6 @@
   "input": {
     "type": "Document",
     "name": "РеализацияТоваров",
-    "registerRecords": ["AccumulationRegister.Продажи"],
     "attributes": [
       "Организация: CatalogRef.Организации",
       "Контрагент: CatalogRef.Контрагенты",

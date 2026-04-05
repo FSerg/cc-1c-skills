@@ -81,7 +81,7 @@
 	<Attributes>
 		<Attribute name="Объект" id="19">
 			<Type>
-				<v8:Type>cfg:ExternalDataProcessorObject.Мастер</v8:Type>
+				<v8:Type>cfg:DataProcessorObject.Мастер</v8:Type>
 			</Type>
 			<MainAttribute>true</MainAttribute>
 		</Attribute>

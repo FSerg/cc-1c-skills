@@ -29,7 +29,7 @@
       ]}
     ],
     "attributes": [
-      { "name": "Объект", "type": "ExternalDataProcessorObject.ЗагрузкаИзФайла", "main": true },
+      { "name": "Объект", "type": "DataProcessorObject.ЗагрузкаИзФайла", "main": true },
       { "name": "ИмяФайла", "type": "string" },
       { "name": "ПерваяСтрокаЗаголовок", "type": "boolean" },
       { "name": "Результат", "type": "string" }

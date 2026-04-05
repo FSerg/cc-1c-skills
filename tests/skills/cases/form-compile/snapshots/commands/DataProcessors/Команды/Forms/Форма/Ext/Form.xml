@@ -36,7 +36,7 @@
 	<Attributes>
 		<Attribute name="Объект" id="9">
 			<Type>
-				<v8:Type>cfg:ExternalDataProcessorObject.Команды</v8:Type>
+				<v8:Type>cfg:DataProcessorObject.Команды</v8:Type>
 			</Type>
 			<MainAttribute>true</MainAttribute>
 		</Attribute>

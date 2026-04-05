@@ -45,8 +45,8 @@
 			<AuxiliaryListForm/>
 			<ChartOfCalculationTypes>ChartOfCalculationTypes.ВидыНачислений</ChartOfCalculationTypes>
 			<Periodicity>Month</Periodicity>
-			<ActionPeriod>true</ActionPeriod>
-			<BasePeriod>true</BasePeriod>
+			<ActionPeriod>false</ActionPeriod>
+			<BasePeriod>false</BasePeriod>
 			<Schedule/>
 			<ScheduleValue/>
 			<ScheduleDate/>

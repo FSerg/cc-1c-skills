@@ -31,7 +31,7 @@
       ]}
     ],
     "attributes": [
-      { "name": "Объект", "type": "ExternalDataProcessorObject.Мастер", "main": true },
+      { "name": "Объект", "type": "DataProcessorObject.Мастер", "main": true },
       { "name": "Параметр1", "type": "string" },
       { "name": "Итог", "type": "string" }
     ],

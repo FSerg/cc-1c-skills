@@ -23,7 +23,7 @@
       { "input": "Результат", "path": "Результат", "multiLine": true, "height": 8, "readOnly": true }
     ],
     "attributes": [
-      { "name": "Объект", "type": "ExternalDataProcessorObject.Команды", "main": true },
+      { "name": "Объект", "type": "DataProcessorObject.Команды", "main": true },
       { "name": "Результат", "type": "string" }
     ],
     "commands": [

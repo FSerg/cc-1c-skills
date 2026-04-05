@@ -26,7 +26,7 @@
       ]}
     ],
     "attributes": [
-      { "name": "Объект", "type": "ExternalDataProcessorObject.СГруппами", "main": true },
+      { "name": "Объект", "type": "DataProcessorObject.СГруппами", "main": true },
       { "name": "Поле1", "type": "string" },
       { "name": "Поле2", "type": "decimal(15,2)" },
       { "name": "Поле3", "type": "date" }

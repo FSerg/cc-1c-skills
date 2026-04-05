@@ -14,7 +14,7 @@
       "script": "form-compile/scripts/form-compile",
       "input": {
         "title": "Тест",
-        "attributes": [{ "name": "Объект", "type": "ExternalDataProcessorObject.Тест", "main": true }],
+        "attributes": [{ "name": "Объект", "type": "DataProcessorObject.Тест", "main": true }],
         "elements": [
           { "input": "Поле1", "path": "Поле1", "title": "Поле 1" }
         ]

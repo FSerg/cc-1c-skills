@@ -23,7 +23,7 @@
       ]}
     ],
     "attributes": [
-      { "name": "Объект", "type": "ExternalDataProcessorObject.Таблица", "main": true },
+      { "name": "Объект", "type": "DataProcessorObject.Таблица", "main": true },
       { "name": "Данные", "type": "ValueTable", "columns": [
         { "name": "Дата", "type": "date" },
         { "name": "Сумма", "type": "decimal(15,2)" },
