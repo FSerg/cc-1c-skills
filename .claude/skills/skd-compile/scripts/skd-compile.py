@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# skd-compile v1.4 — Compile 1C DCS from JSON
+# skd-compile v1.5 — Compile 1C DCS from JSON
 # Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 import argparse
 import json
@@ -702,6 +702,8 @@ def emit_param_value(lines, type_str, val, indent):
             lines.append(f'{indent}<value xsi:type="xs:dateTime">{esc_xml(val_str)}</value>')
         elif val_str == 'true' or val_str == 'false':
             lines.append(f'{indent}<value xsi:type="xs:boolean">{esc_xml(val_str)}</value>')
+        elif re.match(r'^(ПланСчетов|Справочник|Перечисление|Документ|ПланВидовХарактеристик|ПланВидовРасчета|БизнесПроцесс|Задача|РегистрСведений|ПланОбмена|ChartOfAccounts|Catalog|Enum|Document|ChartOfCharacteristicTypes|ChartOfCalculationTypes|BusinessProcess|Task|InformationRegister|ExchangePlan)\.', val_str):
+            lines.append(f'{indent}<value xsi:type="dcscor:DesignTimeValue">{esc_xml(val_str)}</value>')
         else:
             lines.append(f'{indent}<value xsi:type="xs:string">{esc_xml(val_str)}</value>')
 
@@ -726,15 +728,18 @@ def emit_single_param(lines, p, parsed):
     # Value
     emit_param_value(lines, parsed.get('type', ''), parsed.get('value'), '\t\t')
 
+    # Hidden implies useRestriction=true + availableAsField=false
+    if parsed.get('hidden') is True:
+        parsed['availableAsField'] = False
+        parsed['useRestriction'] = True
+
     # UseRestriction
-    if p is not None and not isinstance(p, str) and p.get('useRestriction') is True:
+    if parsed.get('useRestriction') is True or (p is not None and not isinstance(p, str) and p.get('useRestriction') is True):
         lines.append('\t\t<useRestriction>true</useRestriction>')
 
     # Expression
     if parsed.get('expression'):
         lines.append(f'\t\t<expression>{esc_xml(parsed["expression"])}</expression>')
-
-    # Hidden implies availableAsField=false
     if parsed.get('hidden'):
         parsed['availableAsField'] = False
 
@@ -1461,7 +1466,13 @@ def parse_structure_shorthand(s):
         if re.match(r'(?i)^(details|\u0434\u0435\u0442\u0430\u043b\u0438)$', seg):
             group['groupBy'] = []
         else:
-            group['groupBy'] = [seg]
+            # Named group: "ИмяГруппы[Поле]"
+            m_named = re.match(r'^(.+)\[(.+)\]$', seg)
+            if m_named:
+                group['name'] = m_named.group(1).strip()
+                group['groupBy'] = [m_named.group(2).strip()]
+            else:
+                group['groupBy'] = [seg]
 
         if innermost is not None:
             group['children'] = [innermost]

@@ -1,4 +1,4 @@
-﻿# skd-compile v1.4 — Compile 1C DCS from JSON
+﻿# skd-compile v1.5 — Compile 1C DCS from JSON
 # Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 param(
 	[string]$DefinitionFile,
@@ -857,8 +857,14 @@ function Emit-SingleParam {
 	# Value
 	Emit-ParamValue -type $parsed.type -val $parsed.value -indent "`t`t"
 
+	# Hidden implies useRestriction=true + availableAsField=false
+	if ($parsed.hidden -eq $true) {
+		$parsed.availableAsField = $false
+		$parsed.useRestriction = $true
+	}
+
 	# UseRestriction
-	if ($p -isnot [string] -and $p.useRestriction -eq $true) {
+	if ($parsed.useRestriction -eq $true -or ($p -isnot [string] -and $p.useRestriction -eq $true)) {
 		X "`t`t<useRestriction>true</useRestriction>"
 	}
 
@@ -866,9 +872,6 @@ function Emit-SingleParam {
 	if ($parsed.expression) {
 		X "`t`t<expression>$(Esc-Xml $parsed.expression)</expression>"
 	}
-
-	# Hidden implies availableAsField=false
-	if ($parsed.hidden -eq $true) { $parsed.availableAsField = $false }
 
 	# AvailableAsField
 	if ($parsed.availableAsField -eq $false) {
@@ -957,6 +960,8 @@ function Emit-ParamValue {
 			X "$indent<value xsi:type=`"xs:dateTime`">$(Esc-Xml $valStr)</value>"
 		} elseif ($valStr -eq "true" -or $valStr -eq "false") {
 			X "$indent<value xsi:type=`"xs:boolean`">$(Esc-Xml $valStr)</value>"
+		} elseif ($valStr -match '^(ПланСчетов|Справочник|Перечисление|Документ|ПланВидовХарактеристик|ПланВидовРасчета|БизнесПроцесс|Задача|РегистрСведений|ПланОбмена)\.' -or $valStr -match '^(ChartOfAccounts|Catalog|Enum|Document|ChartOfCharacteristicTypes|ChartOfCalculationTypes|BusinessProcess|Task|InformationRegister|ExchangePlan)\.') {
+			X "$indent<value xsi:type=`"dcscor:DesignTimeValue`">$(Esc-Xml $valStr)</value>"
 		} else {
 			X "$indent<value xsi:type=`"xs:string`">$(Esc-Xml $valStr)</value>"
 		}
@@ -1744,6 +1749,10 @@ function Parse-StructureShorthand {
 		if ($seg -match '^(?i)(details|детали)$') {
 			# Empty groupBy = detailed records
 			$group | Add-Member -NotePropertyName "groupBy" -NotePropertyValue @()
+		} elseif ($seg -match '^(.+)\[(.+)\]$') {
+			# Named group: "ИмяГруппы[Поле]"
+			$group | Add-Member -NotePropertyName "name" -NotePropertyValue $Matches[1].Trim()
+			$group | Add-Member -NotePropertyName "groupBy" -NotePropertyValue @($Matches[2].Trim())
 		} else {
 			$group | Add-Member -NotePropertyName "groupBy" -NotePropertyValue @($seg)
 		}
