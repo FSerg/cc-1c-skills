@@ -297,7 +297,7 @@ XML-маппинг — по `<group>` на каждый элемент:
 ### Shorthand
 
 ```
-"<name>: <type> [= <default>] [@autoDates]"
+"<name>: <type> [= <default>] [@autoDates] [@valueList] [@hidden]"
 ```
 
 Примеры:
@@ -332,6 +332,25 @@ XML-маппинг — по `<group>` на каждый элемент:
 "parameters": ["Период: StandardPeriod = LastMonth @autoDates"]
 ```
 
+### @valueList
+
+Флаг `@valueList` генерирует `<valueListAllowed>true</valueListAllowed>` — разрешает передавать список значений в параметр:
+
+```json
+"parameters": ["Организации: CatalogRef.Организации @valueList"]
+```
+
+### @hidden
+
+Флаг `@hidden` — скрытый параметр. Автоматически ставит `availableAsField=false` и исключает параметр из автогенерируемых `dataParameters` при `"dataParameters": "auto"`:
+
+```json
+"parameters": [
+  { "name": "Счет43", "type": "ChartOfAccountsRef.Хозрасчетный", "value": "...", "hidden": true },
+  "СкрытыйПараметр: string = test @hidden"
+]
+```
+
 ### Объектная форма
 
 ```json
@@ -355,6 +374,8 @@ XML-маппинг — по `<group>` на каждый элемент:
 | `value` | Значение по умолчанию |
 | `expression` | Выражение для вычисления |
 | `availableAsField` | `false` — скрыть из полей |
+| `valueListAllowed` | `true` — разрешить список значений |
+| `hidden` | `true` — скрытый параметр (авто `availableAsField=false`, исключение из `dataParameters: auto`) |
 | `useRestriction` | `true` — скрыть от пользователя |
 | `use` | `"Always"`, `"Auto"` |
 
@@ -398,6 +419,8 @@ XML-маппинг — по `<group>` на каждый элемент:
   "appearance": { "Формат": "ЧДЦ=2" }
 }
 ```
+
+Ключ `field` — алиас для `dataPath` (используется если `dataPath` не указан).
 
 ---
 
@@ -606,6 +629,14 @@ XML-маппинг — по `<group>` на каждый элемент:
 
 ### dataParameters
 
+#### Автогенерация
+
+```json
+"dataParameters": "auto"
+```
+
+Генерирует записи `dataParameters` для всех не-hidden параметров с `userSettingID`. Скрытые параметры (`hidden: true` / `@hidden`) исключаются.
+
 #### Shorthand-строка
 
 ```json
@@ -760,7 +791,7 @@ XML-маппинг — по `<group>` на каждый элемент:
 | `style` | Именованный пресет оформления (по умолчанию `"data"`) |
 | `widths` | Массив ширин колонок (применяется ко всем строкам) |
 | `minHeight` | Минимальная высота первой строки (для шапок) |
-| `parameters` | Параметры макета — выражения для подстановки |
+| `parameters` | Параметры макета — выражения для подстановки (поддерживают `drilldown`) |
 
 #### Синтаксис ячеек
 
@@ -820,13 +851,34 @@ XML-маппинг — по `<group>` на каждый элемент:
 
 Детект: если есть `rows` — используется компактный DSL, иначе — raw XML из `template`.
 
+#### Расшифровка (drilldown) в параметрах шаблона
+
+Ключ `drilldown` в параметре шаблона автоматически генерирует:
+1. `DetailsAreaTemplateParameter` с именем `Расшифровка_<значение>`, `fieldExpression` по полю `ИмяРесурса`, `mainAction=DrillDown`
+2. Привязку `Расшифровка` в appearance ячеек, ссылающихся на этот параметр через `{Имя}`
+
+```json
+"parameters": [
+  { "name": "Сырье", "expression": "ПоступлениеСырья", "drilldown": "ПоступлениеСырья" }
+]
+```
+
 ### groupTemplates
 
 ```json
 "groupTemplates": [
-  { "groupField": "ТипЦен", "templateType": "Header", "template": "Макет1" }
+  { "groupName": "ДанныеОтчета", "templateType": "GroupHeader", "template": "Макет1" },
+  { "groupField": "Счет", "templateType": "Header", "template": "Макет2" },
+  { "groupField": "Счет", "templateType": "OverallHeader", "template": "Макет3" }
 ]
 ```
+
+| Ключ | Описание |
+|------|----------|
+| `groupField` | Привязка к полю группировки → `<groupField>` |
+| `groupName` | Привязка к именованной группировке в структуре варианта → `<groupName>` |
+| `templateType` | `Header` / `OverallHeader` → `<groupTemplate>`, `GroupHeader` → `<groupHeaderTemplate>` |
+| `template` | Имя макета |
 
 ---
 

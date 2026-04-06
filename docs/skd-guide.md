@@ -71,7 +71,7 @@
 ]
 ```
 
-`@autoDates` автоматически генерирует параметры `ДатаНачала`/`ДатаОкончания` (заменяет 5 строк на 1).
+Флаги: `@autoDates` (авто ДатаНачала/ДатаОкончания), `@valueList` (разрешить список значений), `@hidden` (скрыть параметр, исключить из `dataParameters: auto`).
 
 ### Вычисляемые поля — shorthand
 
@@ -96,7 +96,7 @@
 ```
 
 - **filter shorthand**: `"Поле оператор значение @флаги"` — флаги `@off`, `@user`, `@quickAccess`, `@normal`, `@inaccessible`
-- **dataParameters shorthand**: `"Имя = значение @флаги"`
+- **dataParameters shorthand**: `"Имя = значение @флаги"`, или `"auto"` — автогенерация для всех не-hidden параметров
 - **structure shorthand**: `"Поле1 > Поле2 > details"` — `>` разделяет уровни группировки
 - **conditionalAppearance**: условное оформление с автоопределением типов значений (Color, Boolean, LocalStringType)
 
@@ -125,12 +125,16 @@
   }
 ],
 "groupTemplates": [
-  { "groupField": "Счет", "templateType": "GroupHeader", "template": "Макет1" },
+  { "groupName": "ДанныеОтчета", "templateType": "GroupHeader", "template": "Макет1" },
   { "groupField": "Счет", "templateType": "Header", "template": "Макет2" }
 ]
 ```
 
 Синтаксис ячеек: `"текст"` — статика, `"{Имя}"` — параметр, `"|"` — объединение с ячейкой выше, `null` — пустая.
+
+Привязки: `groupField` — к полю, `groupName` — к именованной группировке. `templateType`: `Header`/`OverallHeader` → `<groupTemplate>`, `GroupHeader` → `<groupHeaderTemplate>`.
+
+Расшифровка (drilldown): ключ `drilldown` в параметре шаблона генерирует `DetailsAreaTemplateParameter` и привязку `Расшифровка` в appearance ячеек.
 
 Встроенные стили: `header` (фон, центр, перенос), `data` (фон группы), `subheader` (без фона, центр), `total` (без фона). Все — Arial 10, рамки Solid 1px, цвета через стили платформы. Пользовательские стили — через `skd-styles.json` в директории проекта.
 

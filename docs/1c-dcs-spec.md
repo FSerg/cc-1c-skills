@@ -515,6 +515,7 @@ DataCompositionSchema
 | `useRestriction` | нет | `true` — параметр скрыт от пользователя, `false` — доступен |
 | `expression` | нет | Выражение для автоматического вычисления (например, `&Период.ДатаНачала`) |
 | `availableAsField` | нет | `false` — параметр недоступен как поле в отчёте |
+| `valueListAllowed` | нет | `true` — разрешает передавать список значений в параметр |
 | `use` | нет | Режим: `Always` (всегда), `Auto` (автоматически) |
 
 ### Типы значений параметров
@@ -562,26 +563,61 @@ DataCompositionSchema
 |---|---|
 | `name` | Имя макета (ссылаются groupTemplate) |
 | `template` (вложенный) | Описание строк/ячеек (`dcsat:AreaTemplate`) |
-| `parameter` | Параметры макета (`dcsat:ExpressionAreaTemplateParameter`) — выражения для подстановки |
+| `parameter` (Expression) | Параметры макета (`dcsat:ExpressionAreaTemplateParameter`) — выражения для подстановки |
+| `parameter` (Details) | Параметры расшифровки (`dcsat:DetailsAreaTemplateParameter`) — для drilldown |
+
+#### DetailsAreaTemplateParameter
+
+Параметр расшифровки — активирует drilldown при клике на ячейку:
+
+```xml
+<parameter xmlns:dcsat="http://v8.1c.ru/8.1/data-composition-system/area-template"
+           xsi:type="dcsat:DetailsAreaTemplateParameter">
+  <dcsat:name>Расшифровка_ПоступлениеСырья</dcsat:name>
+  <dcsat:fieldExpression>
+    <dcsat:field>ИмяРесурса</dcsat:field>
+    <dcsat:expression>"ПоступлениеСырья"</dcsat:expression>
+  </dcsat:fieldExpression>
+  <dcsat:mainAction>DrillDown</dcsat:mainAction>
+</parameter>
+```
+
+Привязка к ячейке — через appearance `Расшифровка`:
+
+```xml
+<dcscor:item>
+  <dcscor:parameter>Расшифровка</dcscor:parameter>
+  <dcscor:value xsi:type="dcscor:Parameter">Расшифровка_ПоступлениеСырья</dcscor:value>
+</dcscor:item>
+```
 
 ---
 
-## 10. Привязки макетов группировок (groupTemplate)
+## 10. Привязки макетов группировок (groupTemplate, groupHeaderTemplate)
 
-Связывают группировку с пользовательским макетом:
+Связывают группировку с пользовательским макетом. Два XML-элемента:
+
+- `<groupTemplate>` — шаблон строки данных (`Header`) и итогов (`OverallHeader`)
+- `<groupHeaderTemplate>` — шаблон заголовка группировки (шапка таблицы)
 
 ```xml
-<groupTemplate>
-  <groupField>ТипЦен</groupField>
+<groupHeaderTemplate>
+  <groupName>ДанныеОтчета</groupName>
   <templateType>Header</templateType>
   <template>Макет1</template>
+</groupHeaderTemplate>
+<groupTemplate>
+  <groupField>Счет</groupField>
+  <templateType>Header</templateType>
+  <template>Макет2</template>
 </groupTemplate>
 ```
 
 | Элемент | Описание |
 |---|---|
-| `groupField` | Имя поля группировки |
-| `templateType` | Тип: `Header` (заголовок), `Footer` (подвал), `Overall` (общий) |
+| `groupField` | Привязка к полю группировки |
+| `groupName` | Привязка к именованной группировке в структуре варианта |
+| `templateType` | `Header` (строки данных), `OverallHeader` (итоги) |
 | `template` | Ссылка на имя template из раздела 9 |
 
 ---
