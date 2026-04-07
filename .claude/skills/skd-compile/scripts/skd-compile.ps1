@@ -1,4 +1,4 @@
-﻿# skd-compile v1.8 — Compile 1C DCS from JSON
+﻿# skd-compile v1.9 — Compile 1C DCS from JSON
 # Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 param(
 	[string]$DefinitionFile,
@@ -300,12 +300,20 @@ function Parse-TotalShorthand {
 	$dataPath = $parts[0].Trim()
 	$funcPart = $parts[1].Trim()
 
+	# Known DCS aggregate functions (ru + en)
+	$aggFuncs = @('Сумма','Количество','Минимум','Максимум','Среднее',
+	              'Sum','Count','Min','Max','Avg',
+	              'Minimum','Maximum','Average')
+
 	if ($funcPart -match '^\w+\(') {
 		# Already has expression form: Func(expr)
 		return @{ dataPath = $dataPath; expression = $funcPart }
-	} else {
+	} elseif ($funcPart -in $aggFuncs) {
 		# Short: Func → Func(DataPath)
 		return @{ dataPath = $dataPath; expression = "$funcPart($dataPath)" }
+	} else {
+		# Identity or custom expression — use as-is
+		return @{ dataPath = $dataPath; expression = $funcPart }
 	}
 }
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# skd-compile v1.8 — Compile 1C DCS from JSON
+# skd-compile v1.9 — Compile 1C DCS from JSON
 # Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 import argparse
 import json
@@ -221,10 +221,18 @@ def parse_total_shorthand(s):
     data_path = parts[0].strip()
     func_part = parts[1].strip()
 
+    # Known DCS aggregate functions (ru + en)
+    _agg_funcs = {'Сумма','Количество','Минимум','Максимум','Среднее',
+                  'Sum','Count','Min','Max','Avg',
+                  'Minimum','Maximum','Average'}
+
     if re.match(r'^\w+\(', func_part):
         return {'dataPath': data_path, 'expression': func_part}
-    else:
+    elif func_part in _agg_funcs:
         return {'dataPath': data_path, 'expression': f'{func_part}({data_path})'}
+    else:
+        # Identity or custom expression — use as-is
+        return {'dataPath': data_path, 'expression': func_part}
 
 
 # --- Parameter shorthand parser ---
