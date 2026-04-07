@@ -1463,8 +1463,10 @@ async function scanGridRows(formNum, searchLower) {
       sel = lines[0]; // empty search → first row
     }
     if (!sel) return null;
+    const imgBox = sel.querySelector('.gridBoxImg');
+    const isGroup = imgBox ? !!imgBox.querySelector('.gridListH') : false;
     const r = sel.getBoundingClientRect();
-    return { rowCount: lines.length, x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+    return { rowCount: lines.length, x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), isGroup };
   })()`);
 }
 
@@ -1586,8 +1588,8 @@ async function advancedSearchInline(formNum, text) {
  *
  * Strategy (escalating):
  *   1. Scan visible rows for text match (exact → startsWith → includes)
- *   2. Simple search (search input + Enter) → re-scan
- *   3. Advanced search (Alt+F, "по части строки") → re-scan
+ *   2. Advanced search (Alt+F, "по части строки") → re-scan
+ *   3. Fallback: simple search (search input + Enter) → re-scan
  *   4. Not found → Escape → error
  *
  * For object search {field: value}: steps 1, then filterList(val, {field}) per entry, then re-scan.
@@ -1609,7 +1611,7 @@ async function pickFromSelectionForm(selFormNum, fieldName, search, origFormNum)
   async function trySelect(row) {
     const r = await dblclickAndVerify(row, selFormNum, fieldName);
     if (r.ok) return r;
-    hadUnselectableMatch = true; // found match but couldn't select (group row)
+    hadUnselectableMatch = true; // found match but couldn't select (possibly group row or overlay)
     return null; // form still open, try next step
   }
 
@@ -1622,7 +1624,25 @@ async function pickFromSelectionForm(selFormNum, fieldName, search, origFormNum)
     }
   }
 
-  // Step 2: Simple search via search input (directly on the known form, avoids filterList form-detection)
+  // Step 2: Advanced search (Alt+F — fast, no overlay issues)
+  if (typeof search === 'object' && search) {
+    // Per-field advanced search via filterList(val, {field})
+    for (const [fld, val] of Object.entries(search)) {
+      try { await filterList(String(val), { field: fld }); } catch { /* proceed */ }
+    }
+  } else if (searchLower) {
+    // Inline advanced search (Alt+F, "по части строки")
+    await advancedSearchInline(selFormNum, searchText);
+  }
+  if (searchLower) {
+    const row = await scanGridRows(selFormNum, searchLower);
+    if (row?.x) {
+      const r = await trySelect(row);
+      if (r) return r;
+    }
+  }
+
+  // Step 3: Fallback — simple search via search input (for forms without Alt+F support)
   if (typeof search === 'string' && searchLower) {
     const searchInputId = await page.evaluate(`(() => {
       const p = 'form${selFormNum}_';
@@ -1640,30 +1660,12 @@ async function pickFromSelectionForm(selFormNum, fieldName, search, origFormNum)
         await page.waitForTimeout(300);
         await page.keyboard.press('Enter');
         await waitForStable(selFormNum);
-      } catch { /* proceed to advanced search */ }
+      } catch { /* proceed */ }
       const row = await scanGridRows(selFormNum, searchLower);
       if (row?.x) {
         const r = await trySelect(row);
         if (r) return r;
       }
-    }
-  }
-
-  // Step 3: Advanced search
-  if (typeof search === 'object' && search) {
-    // Per-field advanced search via filterList(val, {field})
-    for (const [fld, val] of Object.entries(search)) {
-      try { await filterList(String(val), { field: fld }); } catch { /* proceed */ }
-    }
-  } else if (searchLower) {
-    // Inline advanced search (Alt+F, "по части строки")
-    await advancedSearchInline(selFormNum, searchText);
-  }
-  if (searchLower) {
-    const row = await scanGridRows(selFormNum, searchLower);
-    if (row?.x) {
-      const r = await trySelect(row);
-      if (r) return r;
     }
   }
 
@@ -1720,8 +1722,8 @@ async function isTypeDialog(formNum) {
  * @throws {Error} if type not found
  */
 async function pickFromTypeDialog(formNum, typeName) {
-  // The type dialog is a modal ValueList grid. Uses Ctrl+F "Найти" (Find) dialog
-  // to search in the virtual grid (only ~5 rows visible, scrolling unreliable).
+  // The type dialog is a modal ValueList grid.
+  // Strategy: scan visible rows first (fast path), fall back to Ctrl+F for large lists.
   //
   // Key constraints discovered during testing:
   // - Grid focus: use evaluate(() => gridBody.focus()), NOT page.click({force:true})
@@ -1732,26 +1734,73 @@ async function pickFromTypeDialog(formNum, typeName) {
   // - Enter/Escape in "Найти" close the ENTIRE dialog chain, not just "Найти"
   // - Closing "Найти" via Cancel resets the search — verify grid while "Найти" is open
 
-  // 1. Focus the grid via evaluate (does NOT punch through modal like page.click)
+  const typeNorm = normYo(typeName.toLowerCase());
+
+  // Helper: read visible rows and find matching ones
+  async function readVisibleRows() {
+    return page.evaluate(`(() => {
+      const grid = document.getElementById('form${formNum}_ValueList');
+      if (!grid) return { visible: [], matches: [] };
+      const body = grid.querySelector('.gridBody');
+      if (!body) return { visible: [], matches: [] };
+      const lines = body.querySelectorAll('.gridLine');
+      const norm = s => (s || '').replace(/\\u00a0/g, ' ').trim();
+      const typeNorm = ${JSON.stringify(typeNorm)};
+      const visible = [];
+      const matches = [];
+      for (const line of lines) {
+        const text = norm(line.innerText);
+        if (!text) continue;
+        visible.push(text);
+        if (text.toLowerCase().replace(/ё/gi, 'е').includes(typeNorm)) {
+          const r = line.getBoundingClientRect();
+          matches.push({ text, x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) });
+        }
+      }
+      return { visible, matches };
+    })()`);
+  }
+
+  // Step 1: Scan visible rows (fast path — no Ctrl+F needed for small lists)
+  const scan = await readVisibleRows();
+
+  if (scan.matches.length === 1) {
+    // Single match — click to select, then OK
+    await page.mouse.click(scan.matches[0].x, scan.matches[0].y);
+    await page.waitForTimeout(200);
+    await page.click(`#form${formNum}_OK`, { force: true });
+    await page.waitForTimeout(ACTION_WAIT);
+    return;
+  }
+
+  if (scan.matches.length > 1) {
+    for (let i = 0; i < 3; i++) { await page.keyboard.press('Escape'); await page.waitForTimeout(300); }
+    await waitForStable();
+    throw new Error(`selectValue: multiple types match "${typeName}": ${scan.matches.map(m => '"' + m.text + '"').join(', ')}. Specify a more precise type name`);
+  }
+
+  // Step 2: Not found in visible rows — use Ctrl+F (virtual grid may have more items)
+
+  // Focus the grid via evaluate (does NOT punch through modal like page.click)
   await page.evaluate(`(() => {
     const grid = document.getElementById('form${formNum}_ValueList');
     if (!grid) return;
     const body = grid.querySelector('.gridBody');
     if (body) body.focus(); else grid.focus();
   })()`);
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(300);
 
-  // 2. Ctrl+F to open "Найти" dialog
+  // Ctrl+F to open "Найти" dialog
   await page.keyboard.press('Control+f');
   await page.waitForTimeout(1000);
 
-  // 3. Paste search text (focus is on "Что искать" field)
+  // Paste search text (focus is on "Что искать" field)
   await page.keyboard.press('Control+a');
   await page.evaluate(`navigator.clipboard.writeText(${JSON.stringify(typeName)})`);
   await page.keyboard.press('Control+v');
   await page.waitForTimeout(300);
 
-  // 4. Find the "Найти" dialog form number (it's > formNum)
+  // Find the "Найти" dialog form number (it's > formNum)
   const findFormNum = await page.evaluate(`(() => {
     for (let n = ${formNum} + 1; n < ${formNum} + 20; n++) {
       const btn = document.getElementById('form' + n + '_Find');
@@ -1766,47 +1815,27 @@ async function pickFromTypeDialog(formNum, typeName) {
     throw new Error('selectValue: Ctrl+F did not open "Найти" dialog in type selection');
   }
 
-  // 5. Click "Найти" via page.click({force:true}) — evaluate click doesn't trigger 1C events
+  // Click "Найти" — search is client-side (no server round-trip), 500ms is enough
   await page.click(`#form${findFormNum}_Find`, { force: true });
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(500);
 
-  // 6. Read ALL visible grid rows and check how many match the search text.
-  // After Ctrl+F the grid scrolls to the found row — nearby matching rows are visible too.
-  // The "Найти" dialog may auto-close after search, so don't rely on clicking "Найти" again.
-  const gridCheck = await page.evaluate(`(() => {
-    const grid = document.getElementById('form${formNum}_ValueList');
-    if (!grid) return { visible: [], selected: null };
-    const body = grid.querySelector('.gridBody');
-    if (!body) return { visible: [], selected: null };
-    const lines = body.querySelectorAll('.gridLine');
-    const visible = [];
-    let selected = null;
-    for (const line of lines) {
-      const text = (line.innerText || '').trim().replace(/\\u00a0/g, ' ');
-      if (!text) continue;
-      visible.push(text);
-      if (line.classList.contains('select') || line.classList.contains('selRow')) selected = text;
-    }
-    return { visible, selected };
-  })()`);
+  // Re-read visible rows after search scrolled to match
+  const afterSearch = await readVisibleRows();
 
-  const typeNorm = normYo(typeName.toLowerCase());
-  const matching = (gridCheck.visible || []).filter(t => normYo(t.toLowerCase()).includes(typeNorm));
-
-  if (matching.length === 0) {
+  if (afterSearch.matches.length === 0) {
     for (let i = 0; i < 3; i++) { await page.keyboard.press('Escape'); await page.waitForTimeout(300); }
     await waitForStable();
     throw new Error(`selectValue: type "${typeName}" not found in type selection dialog` +
-      `. Visible: ${(gridCheck.visible || []).join(', ')}`);
+      `. Visible: ${(scan.visible || []).join(', ')}`);
   }
 
-  if (matching.length > 1) {
+  if (afterSearch.matches.length > 1) {
     for (let i = 0; i < 3; i++) { await page.keyboard.press('Escape'); await page.waitForTimeout(300); }
     await waitForStable();
-    throw new Error(`selectValue: multiple types match "${typeName}": ${matching.map(m => '"' + m + '"').join(', ')}. Specify a more precise type name`);
+    throw new Error(`selectValue: multiple types match "${typeName}": ${afterSearch.matches.map(m => '"' + m.text + '"').join(', ')}. Specify a more precise type name`);
   }
 
-  // 7. Click OK on type dialog via page.click({force:true}) — bypasses "Найти" modal
+  // Click OK on type dialog via page.click({force:true}) — bypasses "Найти" modal
   await page.click(`#form${formNum}_OK`, { force: true });
   await page.waitForTimeout(ACTION_WAIT);
 }
