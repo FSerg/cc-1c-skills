@@ -1,4 +1,4 @@
-﻿# skd-compile v1.10 — Compile 1C DCS from JSON
+﻿# skd-compile v1.11 — Compile 1C DCS from JSON
 # Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 param(
 	[string]$DefinitionFile,
@@ -322,7 +322,7 @@ function Parse-TotalShorthand {
 function Parse-ParamShorthand {
 	param([string]$s)
 
-	$result = @{ name = ""; type = ""; value = $null; autoDates = $false }
+	$result = @{ name = ""; type = ""; value = $null; autoDates = $false; title = $null }
 
 	# Extract @autoDates flag
 	if ($s -match '@autoDates') {
@@ -340,6 +340,12 @@ function Parse-ParamShorthand {
 	if ($s -match '@hidden') {
 		$result.hidden = $true
 		$s = $s -replace '\s*@hidden', ''
+	}
+
+	# Extract optional [Title] (mirrors Parse-FieldShorthand)
+	if ($s -match '\[([^\]]*)\]') {
+		$result.title = $Matches[1].Trim()
+		$s = ($s -replace '\s*\[[^\]]*\]\s*', ' ').Trim()
 	}
 
 	# Split "Name: Type = Value"
@@ -863,8 +869,13 @@ function Emit-SingleParam {
 	X "`t<parameter>"
 	X "`t`t<name>$(Esc-Xml $parsed.name)</name>"
 
-	# Title
-	$title = if ($p -isnot [string] -and $p.title) { "$($p.title)" } else { "" }
+	# Title (from parsed first, then from object form)
+	$title = ""
+	if ($parsed.title) {
+		$title = "$($parsed.title)"
+	} elseif ($p -isnot [string] -and $p.title) {
+		$title = "$($p.title)"
+	}
 	if ($title) {
 		Emit-MLText -tag "title" -text $title -indent "`t`t"
 	}
@@ -966,17 +977,21 @@ function Emit-Parameters {
 		# Track parameter for auto dataParameters
 		$script:allParams += @{ name = $parsed.name; hidden = [bool]$parsed.hidden; type = "$($parsed.type)"; value = $parsed.value }
 
-		# @autoDates: auto-generate ДатаНачала and ДатаОкончания
+		# @autoDates: auto-generate ДатаНачала and ДатаОкончания (canonical БСП pattern)
 		if ($parsed.autoDates) {
 			$paramName = $parsed.name
 			$beginParsed = @{
-				name = "ДатаНачала"; type = "date"; value = $null
-				expression = "&$paramName.ДатаНачала"; availableAsField = $false
+				name = "ДатаНачала"; title = "Начало периода"
+				type = "date"; value = "0001-01-01T00:00:00"
+				useRestriction = $true
+				expression = "&$paramName.ДатаНачала"
 			}
 			Emit-SingleParam -p $null -parsed $beginParsed
 			$endParsed = @{
-				name = "ДатаОкончания"; type = "date"; value = $null
-				expression = "&$paramName.ДатаОкончания"; availableAsField = $false
+				name = "ДатаОкончания"; title = "Конец периода"
+				type = "date"; value = "0001-01-01T00:00:00"
+				useRestriction = $true
+				expression = "&$paramName.ДатаОкончания"
 			}
 			Emit-SingleParam -p $null -parsed $endParsed
 		}
@@ -991,9 +1006,12 @@ function Emit-ParamValue {
 	$valStr = "$val"
 
 	if ($type -eq "StandardPeriod") {
-		# val is a period variant string like "LastMonth"
+		# val is a period variant string like "LastMonth" or "Custom".
+		# Always emit startDate/endDate to match how 1C Designer saves the schema.
 		X "$indent<value xsi:type=`"v8:StandardPeriod`">"
 		X "$indent`t<v8:variant xsi:type=`"v8:StandardPeriodVariant`">$(Esc-Xml $valStr)</v8:variant>"
+		X "$indent`t<v8:startDate>0001-01-01T00:00:00</v8:startDate>"
+		X "$indent`t<v8:endDate>0001-01-01T00:00:00</v8:endDate>"
 		X "$indent</value>"
 	} elseif ($type -match '^date') {
 		X "$indent<value xsi:type=`"xs:dateTime`">$(Esc-Xml $valStr)</value>"
@@ -1755,11 +1773,15 @@ function Emit-DataParameters {
 				# StandardPeriod (object form from JSON)
 				X "$indent`t`t<dcscor:value xsi:type=`"v8:StandardPeriod`">"
 				X "$indent`t`t`t<v8:variant xsi:type=`"v8:StandardPeriodVariant`">$(Esc-Xml "$($dp.value.variant)")</v8:variant>"
+				X "$indent`t`t`t<v8:startDate>0001-01-01T00:00:00</v8:startDate>"
+				X "$indent`t`t`t<v8:endDate>0001-01-01T00:00:00</v8:endDate>"
 				X "$indent`t`t</dcscor:value>"
 			} elseif ($dp.value -is [hashtable] -and $dp.value.variant) {
 				# StandardPeriod (hashtable from shorthand parser)
 				X "$indent`t`t<dcscor:value xsi:type=`"v8:StandardPeriod`">"
 				X "$indent`t`t`t<v8:variant xsi:type=`"v8:StandardPeriodVariant`">$(Esc-Xml "$($dp.value.variant)")</v8:variant>"
+				X "$indent`t`t`t<v8:startDate>0001-01-01T00:00:00</v8:startDate>"
+				X "$indent`t`t`t<v8:endDate>0001-01-01T00:00:00</v8:endDate>"
 				X "$indent`t`t</dcscor:value>"
 			} elseif ($dp.value -is [bool]) {
 				$bv = "$($dp.value)".ToLower()

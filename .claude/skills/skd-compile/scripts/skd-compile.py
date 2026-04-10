@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# skd-compile v1.10 — Compile 1C DCS from JSON
+# skd-compile v1.11 — Compile 1C DCS from JSON
 # Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 import argparse
 import json
@@ -238,7 +238,7 @@ def parse_total_shorthand(s):
 # --- Parameter shorthand parser ---
 
 def parse_param_shorthand(s):
-    result = {'name': '', 'type': '', 'value': None, 'autoDates': False}
+    result = {'name': '', 'type': '', 'value': None, 'autoDates': False, 'title': None}
 
     # Extract @autoDates flag
     if '@autoDates' in s:
@@ -254,6 +254,12 @@ def parse_param_shorthand(s):
     if '@hidden' in s:
         result['hidden'] = True
         s = re.sub(r'\s*@hidden', '', s)
+
+    # Extract optional [Title] (mirrors parse_field_shorthand)
+    m = re.search(r'\[([^\]]*)\]', s)
+    if m:
+        result['title'] = m.group(1).strip()
+        s = re.sub(r'\s*\[[^\]]*\]\s*', ' ', s).strip()
 
     # Split "Name: Type = Value"
     m = re.match(r'^([^:]+):\s*(\S+)(\s*=\s*(.+))?$', s)
@@ -708,8 +714,11 @@ def emit_param_value(lines, type_str, val, indent):
     val_str = str(val)
 
     if type_str == 'StandardPeriod':
+        # Always emit startDate/endDate to match how 1C Designer saves the schema.
         lines.append(f'{indent}<value xsi:type="v8:StandardPeriod">')
         lines.append(f'{indent}\t<v8:variant xsi:type="v8:StandardPeriodVariant">{esc_xml(val_str)}</v8:variant>')
+        lines.append(f'{indent}\t<v8:startDate>0001-01-01T00:00:00</v8:startDate>')
+        lines.append(f'{indent}\t<v8:endDate>0001-01-01T00:00:00</v8:endDate>')
         lines.append(f'{indent}</value>')
     elif type_str and re.match(r'^date', type_str):
         lines.append(f'{indent}<value xsi:type="xs:dateTime">{esc_xml(val_str)}</value>')
@@ -735,9 +744,11 @@ def emit_single_param(lines, p, parsed):
     lines.append('\t<parameter>')
     lines.append(f'\t\t<name>{esc_xml(parsed["name"])}</name>')
 
-    # Title
+    # Title (from parsed first, then from object form)
     title = ''
-    if p is not None and not isinstance(p, str) and p.get('title'):
+    if parsed.get('title'):
+        title = str(parsed['title'])
+    elif p is not None and not isinstance(p, str) and p.get('title'):
         title = str(p['title'])
     if title:
         emit_mltext(lines, '\t\t', 'title', title)
@@ -842,21 +853,23 @@ def emit_parameters(lines, defn):
             'value': parsed.get('value'),
         })
 
-        # @autoDates: auto-generate ДатаНачала and ДатаОкончания
+        # @autoDates: auto-generate ДатаНачала and ДатаОкончания (canonical БСП pattern)
         if parsed.get('autoDates'):
             param_name = parsed['name']
             begin_parsed = {
                 'name': '\u0414\u0430\u0442\u0430\u041d\u0430\u0447\u0430\u043b\u0430',
-                'type': 'date', 'value': None,
+                'title': '\u041d\u0430\u0447\u0430\u043b\u043e \u043f\u0435\u0440\u0438\u043e\u0434\u0430',
+                'type': 'date', 'value': '0001-01-01T00:00:00',
+                'useRestriction': True,
                 'expression': f'&{param_name}.\u0414\u0430\u0442\u0430\u041d\u0430\u0447\u0430\u043b\u0430',
-                'availableAsField': False,
             }
             emit_single_param(lines, None, begin_parsed)
             end_parsed = {
                 'name': '\u0414\u0430\u0442\u0430\u041e\u043a\u043e\u043d\u0447\u0430\u043d\u0438\u044f',
-                'type': 'date', 'value': None,
+                'title': '\u041a\u043e\u043d\u0435\u0446 \u043f\u0435\u0440\u0438\u043e\u0434\u0430',
+                'type': 'date', 'value': '0001-01-01T00:00:00',
+                'useRestriction': True,
                 'expression': f'&{param_name}.\u0414\u0430\u0442\u0430\u041e\u043a\u043e\u043d\u0447\u0430\u043d\u0438\u044f',
-                'availableAsField': False,
             }
             emit_single_param(lines, None, end_parsed)
 
@@ -1487,6 +1500,8 @@ def emit_data_parameters(lines, items, indent):
                 # StandardPeriod
                 lines.append(f'{indent}\t\t<dcscor:value xsi:type="v8:StandardPeriod">')
                 lines.append(f'{indent}\t\t\t<v8:variant xsi:type="v8:StandardPeriodVariant">{esc_xml(str(val["variant"]))}</v8:variant>')
+                lines.append(f'{indent}\t\t\t<v8:startDate>0001-01-01T00:00:00</v8:startDate>')
+                lines.append(f'{indent}\t\t\t<v8:endDate>0001-01-01T00:00:00</v8:endDate>')
                 lines.append(f'{indent}\t\t</dcscor:value>')
             elif isinstance(val, bool):
                 bv = str(val).lower()

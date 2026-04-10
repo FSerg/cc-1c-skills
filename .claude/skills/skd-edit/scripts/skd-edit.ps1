@@ -1,4 +1,4 @@
-﻿# skd-edit v1.9 — Atomic 1C DCS editor
+﻿# skd-edit v1.10 — Atomic 1C DCS editor
 # Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 param(
 	[Parameter(Mandatory)]
@@ -11,6 +11,7 @@ param(
 		"add-dataSet","add-variant","add-conditionalAppearance","add-drilldown",
 		"set-query","patch-query","set-outputParameter","set-structure",
 		"modify-field","modify-filter","modify-dataParameter","modify-parameter",
+		"rename-parameter","reorder-parameters",
 		"clear-selection","clear-order","clear-filter",
 		"remove-field","remove-total","remove-calculated-field","remove-parameter","remove-filter")]
 	[string]$Operation,
@@ -285,11 +286,17 @@ function Parse-CalcShorthand {
 function Parse-ParamShorthand {
 	param([string]$s)
 
-	$result = @{ name = ""; type = ""; value = $null; autoDates = $false }
+	$result = @{ name = ""; type = ""; value = $null; autoDates = $false; title = $null }
 
 	if ($s -match '@autoDates') {
 		$result.autoDates = $true
 		$s = $s -replace '\s*@autoDates', ''
+	}
+
+	# Extract optional [Title] (mirrors Parse-FieldShorthand)
+	if ($s -match '\[([^\]]*)\]') {
+		$result.title = $Matches[1].Trim()
+		$s = ($s -replace '\s*\[[^\]]*\]\s*', ' ').Trim()
 	}
 
 	if ($s -match '^([^:]+):\s*(\S+)(\s*=\s*(.+))?$') {
@@ -308,7 +315,9 @@ function Parse-ParamShorthand {
 function Parse-FilterShorthand {
 	param([string]$s)
 
-	$result = @{ field = ""; op = "Equal"; value = $null; use = $true; userSettingID = $null; viewMode = $null }
+	# use is tristate: $null = not specified (modify-* won't touch),
+	# $false = @off (explicit), $true = @on (explicit). add-* writes <use>false</use> only when $false.
+	$result = @{ field = ""; op = "Equal"; value = $null; use = $null; userSettingID = $null; viewMode = $null }
 
 	if ($s -match '@user') {
 		$result.userSettingID = "auto"
@@ -317,6 +326,10 @@ function Parse-FilterShorthand {
 	if ($s -match '@off') {
 		$result.use = $false
 		$s = $s -replace '\s*@off', ''
+	}
+	if ($s -match '@on\b') {
+		$result.use = $true
+		$s = $s -replace '\s*@on\b', ''
 	}
 	if ($s -match '@quickAccess') {
 		$result.viewMode = "QuickAccess"
@@ -383,7 +396,9 @@ function Parse-FilterShorthand {
 function Parse-DataParamShorthand {
 	param([string]$s)
 
-	$result = @{ parameter = ""; value = $null; use = $true; userSettingID = $null; viewMode = $null }
+	# use is tristate: $null = not specified (modify-* won't touch),
+	# $false = @off (explicit), $true = @on (explicit). add-* writes <use>false</use> only when $false.
+	$result = @{ parameter = ""; value = $null; use = $null; userSettingID = $null; viewMode = $null }
 
 	if ($s -match '@user') {
 		$result.userSettingID = "auto"
@@ -392,6 +407,10 @@ function Parse-DataParamShorthand {
 	if ($s -match '@off') {
 		$result.use = $false
 		$s = $s -replace '\s*@off', ''
+	}
+	if ($s -match '@on\b') {
+		$result.use = $true
+		$s = $s -replace '\s*@on\b', ''
 	}
 	if ($s -match '@quickAccess') {
 		$result.viewMode = "QuickAccess"
@@ -784,6 +803,10 @@ function Build-ParamFragment {
 	$lines += "$i<parameter>"
 	$lines += "$i`t<name>$(Esc-Xml $parsed.name)</name>"
 
+	if ($parsed.title) {
+		$lines += (Build-MLTextXml -tag "title" -text $parsed.title -indent "$i`t")
+	}
+
 	if ($parsed.type) {
 		$lines += "$i`t<valueType>"
 		$lines += (Build-ValueTypeXml -typeStr $parsed.type -indent "$i`t`t")
@@ -795,6 +818,8 @@ function Build-ParamFragment {
 		if ($parsed.type -eq "StandardPeriod") {
 			$lines += "$i`t<value xsi:type=`"v8:StandardPeriod`">"
 			$lines += "$i`t`t<v8:variant xsi:type=`"v8:StandardPeriodVariant`">$(Esc-Xml $valStr)</v8:variant>"
+			$lines += "$i`t`t<v8:startDate>0001-01-01T00:00:00</v8:startDate>"
+			$lines += "$i`t`t<v8:endDate>0001-01-01T00:00:00</v8:endDate>"
 			$lines += "$i`t</value>"
 		} elseif ($parsed.type -match '^date') {
 			$lines += "$i`t<value xsi:type=`"xs:dateTime`">$(Esc-Xml $valStr)</value>"
@@ -813,25 +838,30 @@ function Build-ParamFragment {
 	if ($parsed.autoDates) {
 		$paramName = $parsed.name
 
+		# Canonical БСП pattern: title + valueType + value + useRestriction + expression
 		$bLines = @()
 		$bLines += "$i<parameter>"
 		$bLines += "$i`t<name>ДатаНачала</name>"
+		$bLines += (Build-MLTextXml -tag "title" -text "Начало периода" -indent "$i`t")
 		$bLines += "$i`t<valueType>"
 		$bLines += (Build-ValueTypeXml -typeStr "date" -indent "$i`t`t")
 		$bLines += "$i`t</valueType>"
+		$bLines += "$i`t<value xsi:type=`"xs:dateTime`">0001-01-01T00:00:00</value>"
+		$bLines += "$i`t<useRestriction>true</useRestriction>"
 		$bLines += "$i`t<expression>$(Esc-Xml "&$paramName.ДатаНачала")</expression>"
-		$bLines += "$i`t<availableAsField>false</availableAsField>"
 		$bLines += "$i</parameter>"
 		$fragments += ($bLines -join "`r`n")
 
 		$eLines = @()
 		$eLines += "$i<parameter>"
 		$eLines += "$i`t<name>ДатаОкончания</name>"
+		$eLines += (Build-MLTextXml -tag "title" -text "Конец периода" -indent "$i`t")
 		$eLines += "$i`t<valueType>"
 		$eLines += (Build-ValueTypeXml -typeStr "date" -indent "$i`t`t")
 		$eLines += "$i`t</valueType>"
+		$eLines += "$i`t<value xsi:type=`"xs:dateTime`">0001-01-01T00:00:00</value>"
+		$eLines += "$i`t<useRestriction>true</useRestriction>"
 		$eLines += "$i`t<expression>$(Esc-Xml "&$paramName.ДатаОкончания")</expression>"
-		$eLines += "$i`t<availableAsField>false</availableAsField>"
 		$eLines += "$i</parameter>"
 		$fragments += ($eLines -join "`r`n")
 	}
@@ -929,6 +959,8 @@ function Build-DataParamFragment {
 		if ($parsed.value -is [hashtable] -and $parsed.value.variant) {
 			$lines += "$i`t<dcscor:value xsi:type=`"v8:StandardPeriod`">"
 			$lines += "$i`t`t<v8:variant xsi:type=`"v8:StandardPeriodVariant`">$(Esc-Xml $parsed.value.variant)</v8:variant>"
+			$lines += "$i`t`t<v8:startDate>0001-01-01T00:00:00</v8:startDate>"
+			$lines += "$i`t`t<v8:endDate>0001-01-01T00:00:00</v8:endDate>"
 			$lines += "$i`t</dcscor:value>"
 		} elseif ("$($parsed.value)" -match '^\d{4}-\d{2}-\d{2}T') {
 			$lines += "$i`t<dcscor:value xsi:type=`"xs:dateTime`">$(Esc-Xml "$($parsed.value)")</dcscor:value>"
@@ -1711,7 +1743,14 @@ switch ($Operation) {
 
 	"modify-parameter" {
 		foreach ($val in $values) {
-			# Parse: "ParamName key=value key=value"
+			# Parse: "ParamName [Title] key=value key=value"
+			# Extract optional [Title] first (mirrors Parse-FieldShorthand)
+			$titleVal = $null
+			if ($val -match '\[([^\]]*)\]') {
+				$titleVal = $Matches[1].Trim()
+				$val = ($val -replace '\s*\[[^\]]*\]\s*', ' ').Trim()
+			}
+
 			$parts = $val -split '\s+', 2
 			$paramName = $parts[0].Trim()
 			$rest = if ($parts.Count -gt 1) { $parts[1].Trim() } else { "" }
@@ -1724,6 +1763,32 @@ switch ($Operation) {
 			}
 
 			$childIndent = Get-ChildIndent $paramEl
+
+			# Set/replace title (must come right after <name>, before <valueType>)
+			if ($null -ne $titleVal) {
+				$existingTitle = $null
+				foreach ($ch in $paramEl.ChildNodes) {
+					if ($ch.NodeType -eq 'Element' -and $ch.LocalName -eq 'title') {
+						$existingTitle = $ch; break
+					}
+				}
+				if ($existingTitle) {
+					Remove-NodeWithWhitespace $existingTitle
+				}
+				# Insert before first of (valueType, value, useRestriction, expression, availableAsField, ...)
+				$titleRef = $null
+				foreach ($ch in $paramEl.ChildNodes) {
+					if ($ch.NodeType -eq 'Element' -and $ch.LocalName -ne 'name') {
+						$titleRef = $ch; break
+					}
+				}
+				$titleFrag = Build-MLTextXml -tag "title" -text $titleVal -indent $childIndent
+				$titleNodes = Import-Fragment $xmlDoc $titleFrag
+				foreach ($node in $titleNodes) {
+					Insert-BeforeElement $paramEl $node $titleRef $childIndent
+				}
+				Write-Host "[OK] Parameter `"$paramName`": title set to `"$titleVal`""
+			}
 
 			# Separate availableValue=... from simple kv pairs
 			$simpleRest = $rest
@@ -1806,6 +1871,160 @@ switch ($Operation) {
 				}
 				Write-Host "[OK] Parameter `"$paramName`": availableValue added"
 			}
+		}
+	}
+
+	"rename-parameter" {
+		foreach ($val in $values) {
+			# Shorthand: "OldName => NewName"
+			if ($val -notmatch '^\s*(.+?)\s*=>\s*(.+?)\s*$') {
+				Write-Host "[WARN] rename-parameter expects 'OldName => NewName', got: $val"
+				continue
+			}
+			$oldName = $Matches[1].Trim()
+			$newName = $Matches[2].Trim()
+
+			if ($oldName -eq $newName) {
+				Write-Host "[WARN] rename-parameter: old and new names are equal — skipped"
+				continue
+			}
+
+			# 1. Rename <parameter><name>OldName</name>
+			$root = $xmlDoc.DocumentElement
+			$paramEl = Find-ElementByChildValue $root "parameter" "name" $oldName $schNs
+			if (-not $paramEl) {
+				Write-Host "[WARN] Parameter `"$oldName`" not found — skipped"
+				continue
+			}
+			foreach ($ch in $paramEl.ChildNodes) {
+				if ($ch.NodeType -eq 'Element' -and $ch.LocalName -eq 'name' -and $ch.NamespaceURI -eq $schNs) {
+					$ch.InnerText = $newName
+					break
+				}
+			}
+
+			# 2. Update <expression> in other <parameter> elements.
+			# Regex matches "&OldName" only when followed by a non-identifier char (or end),
+			# so "&Период" matches "&Период.ДатаНачала" but NOT "&ПериодОтчета".
+			$escOld = [regex]::Escape($oldName)
+			$exprRegex = "&$escOld(?=[^\w\u0400-\u04FF]|$)"
+			$exprUpdated = 0
+			foreach ($ch in $root.ChildNodes) {
+				if ($ch.NodeType -ne 'Element' -or $ch.LocalName -ne 'parameter' -or $ch.NamespaceURI -ne $schNs) { continue }
+				foreach ($gc in $ch.ChildNodes) {
+					if ($gc.NodeType -eq 'Element' -and $gc.LocalName -eq 'expression' -and $gc.NamespaceURI -eq $schNs) {
+						$oldExpr = $gc.InnerText
+						$newExpr = [regex]::Replace($oldExpr, $exprRegex, "&$newName")
+						if ($newExpr -ne $oldExpr) {
+							$gc.InnerText = $newExpr
+							$exprUpdated++
+						}
+					}
+				}
+			}
+
+			# 3. Update <dcscor:parameter>OldName</dcscor:parameter> in dataParameters of all variants.
+			# Note: <settingsVariant> is in schNs, but <settings> and <dataParameters> are in setNs.
+			# IMPORTANT: don't use $variant — it collides with script parameter [string]$Variant
+			# (PowerShell vars are case-insensitive, and the [string] type would coerce XmlNode to "").
+			$dpUpdated = 0
+			foreach ($variantNode in $root.ChildNodes) {
+				if ($variantNode.NodeType -ne 'Element' -or $variantNode.LocalName -ne 'settingsVariant' -or $variantNode.NamespaceURI -ne $schNs) { continue }
+				$settings = Find-FirstElement $variantNode @("settings") $setNs
+				if (-not $settings) { continue }
+				$dpEl = Find-FirstElement $settings @("dataParameters") $setNs
+				if (-not $dpEl) { continue }
+				foreach ($item in $dpEl.ChildNodes) {
+					if ($item.NodeType -ne 'Element' -or $item.LocalName -ne 'item') { continue }
+					foreach ($gc in $item.ChildNodes) {
+						if ($gc.NodeType -eq 'Element' -and $gc.LocalName -eq 'parameter' -and $gc.NamespaceURI -eq $corNs) {
+							if ($gc.InnerText.Trim() -eq $oldName) {
+								$gc.InnerText = $newName
+								$dpUpdated++
+							}
+						}
+					}
+				}
+			}
+
+			Write-Host "[OK] Parameter renamed: `"$oldName`" => `"$newName`" (expressions updated: $exprUpdated, dataParameters updated: $dpUpdated)"
+		}
+	}
+
+	"reorder-parameters" {
+		foreach ($val in $values) {
+			# Shorthand: "Name1, Name2, Name3" — partial list, listed names go first in order, rest preserve original order
+			$order = @($val -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+			if ($order.Count -eq 0) {
+				Write-Host "[WARN] reorder-parameters: empty list — skipped"
+				continue
+			}
+
+			$root = $xmlDoc.DocumentElement
+
+			# Collect all <parameter> in document order with their child indent
+			$allParams = @()
+			foreach ($ch in $root.ChildNodes) {
+				if ($ch.NodeType -eq 'Element' -and $ch.LocalName -eq 'parameter' -and $ch.NamespaceURI -eq $schNs) {
+					$allParams += $ch
+				}
+			}
+			if ($allParams.Count -eq 0) {
+				Write-Host "[WARN] reorder-parameters: no parameters in schema"
+				continue
+			}
+
+			$childIndent = Get-ChildIndent $root
+
+			# Build name -> element map
+			$byName = @{}
+			foreach ($pe in $allParams) {
+				foreach ($gc in $pe.ChildNodes) {
+					if ($gc.NodeType -eq 'Element' -and $gc.LocalName -eq 'name' -and $gc.NamespaceURI -eq $schNs) {
+						$byName[$gc.InnerText.Trim()] = $pe
+						break
+					}
+				}
+			}
+
+			# Build new order
+			$newOrder = @()
+			$used = @{}
+			foreach ($name in $order) {
+				if ($byName.ContainsKey($name)) {
+					$newOrder += $byName[$name]
+					$used[$name] = $true
+				} else {
+					Write-Host "[WARN] reorder-parameters: parameter `"$name`" not found — skipped"
+				}
+			}
+			foreach ($pe in $allParams) {
+				$peName = $null
+				foreach ($gc in $pe.ChildNodes) {
+					if ($gc.NodeType -eq 'Element' -and $gc.LocalName -eq 'name' -and $gc.NamespaceURI -eq $schNs) {
+						$peName = $gc.InnerText.Trim(); break
+					}
+				}
+				if ($peName -and -not $used.ContainsKey($peName)) {
+					$newOrder += $pe
+				}
+			}
+
+			# Find anchor: element right after the last parameter in original order
+			$lastParam = $allParams[-1]
+			$anchor = $lastParam.NextSibling
+
+			# Remove all parameters with surrounding whitespace
+			foreach ($pe in $allParams) {
+				Remove-NodeWithWhitespace $pe
+			}
+
+			# Re-insert in new order before anchor
+			foreach ($pe in $newOrder) {
+				Insert-BeforeElement $root $pe $anchor $childIndent
+			}
+
+			Write-Host "[OK] Parameters reordered ($($allParams.Count) total, $($order.Count) explicit)"
 		}
 	}
 
@@ -2276,11 +2495,11 @@ switch ($Operation) {
 				Set-OrCreateChildElementWithAttr $filterItem "right" $setNs "$($parsed.value)" $vt $itemIndent
 			}
 
-			# Update use
+			# Update use (only when explicitly set via @off / @on)
 			if ($parsed.use -eq $false) {
 				Set-OrCreateChildElement $filterItem "use" $setNs "false" $itemIndent
-			} else {
-				# If explicitly not @off, remove use=false if exists
+			} elseif ($parsed.use -eq $true) {
+				# @on: remove existing use=false if any
 				$useEl = $null
 				foreach ($ch in $filterItem.ChildNodes) {
 					if ($ch.NodeType -eq 'Element' -and $ch.LocalName -eq 'use' -and $ch.NamespaceURI -eq $setNs) {
@@ -2346,6 +2565,8 @@ switch ($Operation) {
 				if ($parsed.value -is [hashtable] -and $parsed.value.variant) {
 					$valLines += "$itemIndent<dcscor:value xsi:type=`"v8:StandardPeriod`">"
 					$valLines += "$itemIndent`t<v8:variant xsi:type=`"v8:StandardPeriodVariant`">$(Esc-Xml $parsed.value.variant)</v8:variant>"
+					$valLines += "$itemIndent`t<v8:startDate>0001-01-01T00:00:00</v8:startDate>"
+					$valLines += "$itemIndent`t<v8:endDate>0001-01-01T00:00:00</v8:endDate>"
 					$valLines += "$itemIndent</dcscor:value>"
 				} elseif ("$($parsed.value)" -match '^\d{4}-\d{2}-\d{2}T') {
 					$valLines += "$itemIndent<dcscor:value xsi:type=`"xs:dateTime`">$(Esc-Xml "$($parsed.value)")</dcscor:value>"
@@ -2361,10 +2582,11 @@ switch ($Operation) {
 				}
 			}
 
-			# Update use
+			# Update use (only when explicitly set via @off / @on)
 			if ($parsed.use -eq $false) {
 				Set-OrCreateChildElement $dpItem "use" $corNs "false" $itemIndent
-			} else {
+			} elseif ($parsed.use -eq $true) {
+				# @on: remove existing use=false if any
 				$useEl = $null
 				foreach ($ch in $dpItem.ChildNodes) {
 					if ($ch.NodeType -eq 'Element' -and $ch.LocalName -eq 'use' -and $ch.NamespaceURI -eq $corNs) {

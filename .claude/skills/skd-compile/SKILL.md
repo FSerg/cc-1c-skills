@@ -95,16 +95,18 @@ powershell.exe -NoProfile -File .claude/skills/skd-compile/scripts/skd-compile.p
 
 ```json
 "parameters": [
-  "Период: StandardPeriod = LastMonth @autoDates"
+  "Период [Отчетный период]: StandardPeriod = LastMonth @autoDates"
 ]
 ```
 
+Shorthand: `"Имя [Заголовок]: тип = значение @флаги"`. `[Заголовок]` опциональный — добавляет `<title>` (LocalStringType).
+
 Флаги shorthand:
-- `@autoDates` — автоматически генерирует параметры `ДатаНачала` и `ДатаОкончания` с выражениями `&Период.ДатаНачала` / `&Период.ДатаОкончания` и `availableAsField=false`
+- `@autoDates` — генерирует пару скрытых параметров `ДатаНачала`/`ДатаОкончания` с выражениями `&Имя.ДатаНачала`/`&Имя.ДатаОкончания`. Используется для StandardPeriod в БСП-отчётах: БСП превращает эту пару в два отдельных поля «Начало/Конец» в панели быстрых настроек.
 - `@valueList` — `<valueListAllowed>true</valueListAllowed>` — разрешает передавать список значений
 - `@hidden` — скрытый параметр: `availableAsField=false` + исключается из `"dataParameters": "auto"`
 
-Объектная форма: `hidden: true`, `valueListAllowed: true`, `availableAsField: false`, `denyIncompleteValues: true`, `use: "Always"`.
+Объектная форма: `title`, `hidden: true`, `valueListAllowed: true`, `availableAsField: false`, `denyIncompleteValues: true`, `use: "Always"`.
 
 Список допустимых значений (availableValues):
 

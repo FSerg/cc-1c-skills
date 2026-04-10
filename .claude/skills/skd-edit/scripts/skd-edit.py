@@ -1,4 +1,4 @@
-# skd-edit v1.9 — Atomic 1C DCS editor (Python port)
+# skd-edit v1.10 — Atomic 1C DCS editor (Python port)
 # Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 import argparse
 import os
@@ -19,6 +19,7 @@ VALID_OPS = [
     "add-dataSet", "add-variant", "add-conditionalAppearance", "add-drilldown",
     "set-query", "patch-query", "set-outputParameter", "set-structure",
     "modify-field", "modify-filter", "modify-dataParameter", "modify-parameter",
+    "rename-parameter", "reorder-parameters",
     "clear-selection", "clear-order", "clear-filter",
     "remove-field", "remove-total", "remove-calculated-field", "remove-parameter", "remove-filter",
 ]
@@ -282,11 +283,17 @@ def parse_calc_shorthand(s):
 
 
 def parse_param_shorthand(s):
-    result = {"name": "", "type": "", "value": None, "autoDates": False}
+    result = {"name": "", "type": "", "value": None, "autoDates": False, "title": None}
 
     if re.search(r'@autoDates', s):
         result["autoDates"] = True
         s = re.sub(r'\s*@autoDates', '', s)
+
+    # Extract optional [Title] (mirrors parse_field_shorthand)
+    m = re.search(r'\[([^\]]*)\]', s)
+    if m:
+        result["title"] = m.group(1).strip()
+        s = re.sub(r'\s*\[[^\]]*\]\s*', ' ', s).strip()
 
     m = re.match(r'^([^:]+):\s*(\S+)(\s*=\s*(.+))?$', s)
     if m:
@@ -301,7 +308,9 @@ def parse_param_shorthand(s):
 
 
 def parse_filter_shorthand(s):
-    result = {"field": "", "op": "Equal", "value": None, "use": True, "userSettingID": None, "viewMode": None}
+    # use is tristate: None = not specified (modify-* won't touch),
+    # False = @off (explicit), True = @on (explicit). add-* writes <use>false</use> only when False.
+    result = {"field": "", "op": "Equal", "value": None, "use": None, "userSettingID": None, "viewMode": None}
 
     if re.search(r'@user', s):
         result["userSettingID"] = "auto"
@@ -309,6 +318,9 @@ def parse_filter_shorthand(s):
     if re.search(r'@off', s):
         result["use"] = False
         s = re.sub(r'\s*@off', '', s)
+    if re.search(r'@on\b', s):
+        result["use"] = True
+        s = re.sub(r'\s*@on\b', '', s)
     if re.search(r'@quickAccess', s):
         result["viewMode"] = "QuickAccess"
         s = re.sub(r'\s*@quickAccess', '', s)
@@ -366,7 +378,9 @@ def parse_filter_shorthand(s):
 
 
 def parse_data_param_shorthand(s):
-    result = {"parameter": "", "value": None, "use": True, "userSettingID": None, "viewMode": None}
+    # use is tristate: None = not specified (modify-* won't touch),
+    # False = @off (explicit), True = @on (explicit). add-* writes <use>false</use> only when False.
+    result = {"parameter": "", "value": None, "use": None, "userSettingID": None, "viewMode": None}
 
     if re.search(r'@user', s):
         result["userSettingID"] = "auto"
@@ -374,6 +388,9 @@ def parse_data_param_shorthand(s):
     if re.search(r'@off', s):
         result["use"] = False
         s = re.sub(r'\s*@off', '', s)
+    if re.search(r'@on\b', s):
+        result["use"] = True
+        s = re.sub(r'\s*@on\b', '', s)
     if re.search(r'@quickAccess', s):
         result["viewMode"] = "QuickAccess"
         s = re.sub(r'\s*@quickAccess', '', s)
@@ -696,6 +713,10 @@ def build_param_fragment(parsed, indent):
     fragments = []
 
     lines = [f"{i}<parameter>", f"{i}\t<name>{esc_xml(parsed['name'])}</name>"]
+
+    if parsed.get("title"):
+        lines.append(build_mltext_xml("title", parsed["title"], f"{i}\t"))
+
     if parsed.get("type"):
         lines.append(f"{i}\t<valueType>")
         lines.append(build_value_type_xml(parsed["type"], f"{i}\t\t"))
@@ -706,6 +727,8 @@ def build_param_fragment(parsed, indent):
         if parsed.get("type") == "StandardPeriod":
             lines.append(f'{i}\t<value xsi:type="v8:StandardPeriod">')
             lines.append(f'{i}\t\t<v8:variant xsi:type="v8:StandardPeriodVariant">{esc_xml(val_str)}</v8:variant>')
+            lines.append(f"{i}\t\t<v8:startDate>0001-01-01T00:00:00</v8:startDate>")
+            lines.append(f"{i}\t\t<v8:endDate>0001-01-01T00:00:00</v8:endDate>")
             lines.append(f"{i}\t</value>")
         elif parsed.get("type", "").startswith("date"):
             lines.append(f'{i}\t<value xsi:type="xs:dateTime">{esc_xml(val_str)}</value>')
@@ -721,14 +744,17 @@ def build_param_fragment(parsed, indent):
 
     if parsed.get("autoDates"):
         param_name = parsed["name"]
+        # Canonical БСП pattern: title + valueType + value + useRestriction + expression
         b_lines = [
             f"{i}<parameter>",
             f"{i}\t<name>\u0414\u0430\u0442\u0430\u041d\u0430\u0447\u0430\u043b\u0430</name>",
+            build_mltext_xml("title", "\u041d\u0430\u0447\u0430\u043b\u043e \u043f\u0435\u0440\u0438\u043e\u0434\u0430", f"{i}\t"),
             f"{i}\t<valueType>",
             build_value_type_xml("date", f"{i}\t\t"),
             f"{i}\t</valueType>",
+            f'{i}\t<value xsi:type="xs:dateTime">0001-01-01T00:00:00</value>',
+            f"{i}\t<useRestriction>true</useRestriction>",
             f"{i}\t<expression>{esc_xml('&' + param_name + '.\u0414\u0430\u0442\u0430\u041d\u0430\u0447\u0430\u043b\u0430')}</expression>",
-            f"{i}\t<availableAsField>false</availableAsField>",
             f"{i}</parameter>",
         ]
         fragments.append("\r\n".join(b_lines))
@@ -736,11 +762,13 @@ def build_param_fragment(parsed, indent):
         e_lines = [
             f"{i}<parameter>",
             f"{i}\t<name>\u0414\u0430\u0442\u0430\u041e\u043a\u043e\u043d\u0447\u0430\u043d\u0438\u044f</name>",
+            build_mltext_xml("title", "\u041a\u043e\u043d\u0435\u0446 \u043f\u0435\u0440\u0438\u043e\u0434\u0430", f"{i}\t"),
             f"{i}\t<valueType>",
             build_value_type_xml("date", f"{i}\t\t"),
             f"{i}\t</valueType>",
+            f'{i}\t<value xsi:type="xs:dateTime">0001-01-01T00:00:00</value>',
+            f"{i}\t<useRestriction>true</useRestriction>",
             f"{i}\t<expression>{esc_xml('&' + param_name + '.\u0414\u0430\u0442\u0430\u041e\u043a\u043e\u043d\u0447\u0430\u043d\u0438\u044f')}</expression>",
-            f"{i}\t<availableAsField>false</availableAsField>",
             f"{i}</parameter>",
         ]
         fragments.append("\r\n".join(e_lines))
@@ -824,6 +852,8 @@ def build_data_param_fragment(parsed, indent):
         if isinstance(val, dict) and val.get("variant"):
             lines.append(f'{i}\t<dcscor:value xsi:type="v8:StandardPeriod">')
             lines.append(f'{i}\t\t<v8:variant xsi:type="v8:StandardPeriodVariant">{esc_xml(val["variant"])}</v8:variant>')
+            lines.append(f"{i}\t\t<v8:startDate>0001-01-01T00:00:00</v8:startDate>")
+            lines.append(f"{i}\t\t<v8:endDate>0001-01-01T00:00:00</v8:endDate>")
             lines.append(f"{i}\t</dcscor:value>")
         elif re.match(r'^\d{4}-\d{2}-\d{2}T', str(val)):
             lines.append(f'{i}\t<dcscor:value xsi:type="xs:dateTime">{esc_xml(str(val))}</dcscor:value>')
@@ -1480,6 +1510,13 @@ elif operation == "add-parameter":
 
 elif operation == "modify-parameter":
     for val in values:
+        # Extract optional [Title] first (mirrors parse_field_shorthand)
+        title_val = None
+        m_title = re.search(r'\[([^\]]*)\]', val)
+        if m_title:
+            title_val = m_title.group(1).strip()
+            val = re.sub(r'\s*\[[^\]]*\]\s*', ' ', val).strip()
+
         parts = val.split(None, 1)
         param_name = parts[0].strip()
         rest = parts[1].strip() if len(parts) > 1 else ""
@@ -1490,6 +1527,18 @@ elif operation == "modify-parameter":
             continue
 
         child_indent = get_child_indent(param_el)
+
+        # Set/replace title (must come right after <name>, before <valueType>)
+        if title_val is not None:
+            existing_title = next((ch for ch in param_el if isinstance(ch.tag, str) and local_name(ch) == "title"), None)
+            if existing_title is not None:
+                remove_node_with_whitespace(existing_title)
+            # Insert before the first child after <name>
+            title_ref = next((ch for ch in param_el if isinstance(ch.tag, str) and local_name(ch) != "name"), None)
+            title_frag = build_mltext_xml("title", title_val, child_indent)
+            for node in import_fragment(xml_doc, title_frag):
+                insert_before_element(param_el, node, title_ref, child_indent)
+            print(f'[OK] Parameter "{param_name}": title set to "{title_val}"')
 
         # Separate availableValue=... from simple kv pairs
         simple_rest = rest
@@ -1552,6 +1601,126 @@ elif operation == "modify-parameter":
             for node in nodes:
                 insert_before_element(param_el, node, ref_node, child_indent)
             print(f'[OK] Parameter "{param_name}": availableValue added')
+
+elif operation == "rename-parameter":
+    root = xml_doc
+    for val in values:
+        m_rn = re.match(r'^\s*(.+?)\s*=>\s*(.+?)\s*$', val)
+        if not m_rn:
+            print(f'[WARN] rename-parameter expects "OldName => NewName", got: {val}')
+            continue
+        old_name = m_rn.group(1).strip()
+        new_name = m_rn.group(2).strip()
+
+        if old_name == new_name:
+            print('[WARN] rename-parameter: old and new names are equal -- skipped')
+            continue
+
+        # 1. Rename <parameter><name>OldName</name>
+        param_el = find_element_by_child_value(root, "parameter", "name", old_name, SCH_NS)
+        if param_el is None:
+            print(f'[WARN] Parameter "{old_name}" not found -- skipped')
+            continue
+        for ch in param_el:
+            if isinstance(ch.tag, str) and local_name(ch) == "name" and etree.QName(ch.tag).namespace == SCH_NS:
+                ch.text = new_name
+                break
+
+        # 2. Update <expression> in other <parameter> elements.
+        # Regex matches "&OldName" only when followed by a non-identifier char (or end),
+        # so "&Период" matches "&Период.ДатаНачала" but NOT "&ПериодОтчета".
+        esc_old = re.escape(old_name)
+        expr_regex = re.compile(rf'&{esc_old}(?=[^\w\u0400-\u04FF]|$)')
+        expr_updated = 0
+        for ch in root:
+            if not (isinstance(ch.tag, str) and local_name(ch) == "parameter" and etree.QName(ch.tag).namespace == SCH_NS):
+                continue
+            for gc in ch:
+                if isinstance(gc.tag, str) and local_name(gc) == "expression" and etree.QName(gc.tag).namespace == SCH_NS:
+                    old_expr = gc.text or ""
+                    new_expr = expr_regex.sub(f'&{new_name}', old_expr)
+                    if new_expr != old_expr:
+                        gc.text = new_expr
+                        expr_updated += 1
+
+        # 3. Update <dcscor:parameter>OldName</dcscor:parameter> in dataParameters of all variants.
+        dp_updated = 0
+        for variant_node in root:
+            if not (isinstance(variant_node.tag, str) and local_name(variant_node) == "settingsVariant" and etree.QName(variant_node.tag).namespace == SCH_NS):
+                continue
+            settings_node = find_first_element(variant_node, ["settings"], SET_NS)
+            if settings_node is None:
+                continue
+            dp_el = find_first_element(settings_node, ["dataParameters"], SET_NS)
+            if dp_el is None:
+                continue
+            for item in dp_el:
+                if not (isinstance(item.tag, str) and local_name(item) == "item"):
+                    continue
+                for gc in item:
+                    if isinstance(gc.tag, str) and local_name(gc) == "parameter" and etree.QName(gc.tag).namespace == COR_NS:
+                        if (gc.text or "").strip() == old_name:
+                            gc.text = new_name
+                            dp_updated += 1
+
+        print(f'[OK] Parameter renamed: "{old_name}" => "{new_name}" (expressions updated: {expr_updated}, dataParameters updated: {dp_updated})')
+
+elif operation == "reorder-parameters":
+    root = xml_doc
+    for val in values:
+        order = [s.strip() for s in val.split(",") if s.strip()]
+        if not order:
+            print('[WARN] reorder-parameters: empty list -- skipped')
+            continue
+
+        all_params = []
+        for ch in root:
+            if isinstance(ch.tag, str) and local_name(ch) == "parameter" and etree.QName(ch.tag).namespace == SCH_NS:
+                all_params.append(ch)
+        if not all_params:
+            print('[WARN] reorder-parameters: no parameters in schema')
+            continue
+
+        child_indent = get_child_indent(root)
+
+        by_name = {}
+        for pe in all_params:
+            for gc in pe:
+                if isinstance(gc.tag, str) and local_name(gc) == "name" and etree.QName(gc.tag).namespace == SCH_NS:
+                    by_name[(gc.text or "").strip()] = pe
+                    break
+
+        new_order = []
+        used = set()
+        for name in order:
+            if name in by_name:
+                new_order.append(by_name[name])
+                used.add(name)
+            else:
+                print(f'[WARN] reorder-parameters: parameter "{name}" not found -- skipped')
+
+        for pe in all_params:
+            pe_name = None
+            for gc in pe:
+                if isinstance(gc.tag, str) and local_name(gc) == "name" and etree.QName(gc.tag).namespace == SCH_NS:
+                    pe_name = (gc.text or "").strip()
+                    break
+            if pe_name and pe_name not in used:
+                new_order.append(pe)
+
+        # Anchor: element right after the last parameter in original order
+        last_param = all_params[-1]
+        anchor = last_param.getnext()
+
+        # Remove all parameters with surrounding whitespace
+        for pe in all_params:
+            remove_node_with_whitespace(pe)
+
+        # Re-insert in new order before anchor
+        for pe in new_order:
+            insert_before_element(root, pe, anchor, child_indent)
+
+        print(f'[OK] Parameters reordered ({len(all_params)} total, {len(order)} explicit)')
 
 elif operation == "add-filter":
     settings = resolve_variant_settings()
@@ -1922,9 +2091,11 @@ elif operation == "modify-filter":
             vt = parsed.get("valueType", "xs:string")
             set_or_create_child_element_with_attr(filter_item, "right", SET_NS, str(parsed["value"]), vt, item_indent)
 
+        # Update use (only when explicitly set via @off / @on)
         if parsed.get("use") is False:
             set_or_create_child_element(filter_item, "use", SET_NS, "false", item_indent)
-        else:
+        elif parsed.get("use") is True:
+            # @on: remove existing use=false if any
             for ch in filter_item:
                 if isinstance(ch.tag, str) and local_name(ch) == "use" and etree.QName(ch.tag).namespace == SET_NS:
                     if (ch.text or "").strip() == "false":
@@ -1971,6 +2142,8 @@ elif operation == "modify-dataParameter":
             if isinstance(pv, dict) and pv.get("variant"):
                 val_lines.append(f'{item_indent}<dcscor:value xsi:type="v8:StandardPeriod">')
                 val_lines.append(f'{item_indent}\t<v8:variant xsi:type="v8:StandardPeriodVariant">{esc_xml(pv["variant"])}</v8:variant>')
+                val_lines.append(f"{item_indent}\t<v8:startDate>0001-01-01T00:00:00</v8:startDate>")
+                val_lines.append(f"{item_indent}\t<v8:endDate>0001-01-01T00:00:00</v8:endDate>")
                 val_lines.append(f"{item_indent}</dcscor:value>")
             elif re.match(r'^\d{4}-\d{2}-\d{2}T', str(pv)):
                 val_lines.append(f'{item_indent}<dcscor:value xsi:type="xs:dateTime">{esc_xml(str(pv))}</dcscor:value>')
@@ -1984,9 +2157,11 @@ elif operation == "modify-dataParameter":
             for node in val_nodes:
                 insert_before_element(dp_item, node, None, item_indent)
 
+        # Update use (only when explicitly set via @off / @on)
         if parsed.get("use") is False:
             set_or_create_child_element(dp_item, "use", COR_NS, "false", item_indent)
-        else:
+        elif parsed.get("use") is True:
+            # @on: remove existing use=false if any
             for ch in dp_item:
                 if isinstance(ch.tag, str) and local_name(ch) == "use" and etree.QName(ch.tag).namespace == COR_NS:
                     if (ch.text or "").strip() == "false":
