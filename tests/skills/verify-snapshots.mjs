@@ -60,17 +60,17 @@ function resolveScript(relPath, runtime) {
   return full;
 }
 
-function execSkill(runtime, scriptRelPath, args, timeout = 60_000) {
+function execSkill(runtime, scriptRelPath, args, timeout = 60_000, cwd = REPO_ROOT) {
   const scriptPath = resolveScript(scriptRelPath, runtime);
   if (runtime === 'python') {
     return execFileSync(process.env.PYTHON || 'python', [scriptPath, ...args], {
-      encoding: 'utf8', timeout, stdio: ['pipe', 'pipe', 'pipe'], cwd: REPO_ROOT,
+      encoding: 'utf8', timeout, stdio: ['pipe', 'pipe', 'pipe'], cwd,
     });
   }
   return execFileSync('powershell.exe', [
     '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
     '-File', scriptPath, ...args
-  ], { encoding: 'utf8', timeout, stdio: ['pipe', 'pipe', 'pipe'], cwd: REPO_ROOT });
+  ], { encoding: 'utf8', timeout, stdio: ['pipe', 'pipe', 'pipe'], cwd });
 }
 
 // ─── Dependency resolution ──────────────────────────────────────────────────
@@ -363,6 +363,21 @@ async function verifyCase(skillName, caseName, skillConfig, caseData, opts) {
   const configDir = (setupType === 'empty-config' || isCfInit) ? workDir : null;
 
   try {
+    // ── Step 0: Case-level fixture copy (runner.mjs compatibility) ──
+    // A case may declare `"setup": "fixture:<name>"` pointing to
+    // tests/skills/cases/<skill>/fixtures/<name> — copy its contents into workDir
+    // so the skill script finds them at the expected relative path.
+    if (typeof caseData.setup === 'string' && caseData.setup.startsWith('fixture:')) {
+      const fixtureName = caseData.setup.slice('fixture:'.length);
+      const fixturePath = join(CASES, skillName, 'fixtures', fixtureName);
+      if (!existsSync(fixturePath)) {
+        result.errors.push(`Fixture not found: ${fixturePath}`);
+        return result;
+      }
+      cpSync(fixturePath, workDir, { recursive: true });
+      log(`fixture: ${fixtureName}`, true);
+    }
+
     // ── Step 1: Setup (cf-init for empty-config, nothing for 'none') ──
     // Skip setup for cf-init skill — the test itself creates the config
     if (configDir && setupType === 'empty-config' && !CONFIG_INIT_SKILLS.has(skillName)) {
@@ -468,7 +483,8 @@ async function verifyCase(skillName, caseName, skillConfig, caseData, opts) {
 
     try {
       const { args } = buildSkillArgs(skillConfig, caseData, workDir, inputFile, opts.runtime);
-      const output = execSkill(opts.runtime, skillConfig.script, args);
+      const mainCwd = skillConfig.cwd === 'workDir' ? workDir : REPO_ROOT;
+      const output = execSkill(opts.runtime, skillConfig.script, args, 60_000, mainCwd);
       const lastLine = output.trim().split('\n').pop();
       if (caseData.expectError) {
         log(skillName, false, 'expected non-zero exit but got success');
