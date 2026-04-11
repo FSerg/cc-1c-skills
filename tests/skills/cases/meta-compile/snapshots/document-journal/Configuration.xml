@@ -246,6 +246,8 @@
 		</Properties>
 		<ChildObjects>
 			<Language>Русский</Language>
+			<Document>ПриходнаяНакладная</Document>
+			<Document>РасходнаяНакладная</Document>
 			<DocumentJournal>ЖурналСкладскихДокументов</DocumentJournal>
 		</ChildObjects>
 	</Configuration>
