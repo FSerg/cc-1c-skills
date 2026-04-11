@@ -470,9 +470,24 @@ async function verifyCase(skillName, caseName, skillConfig, caseData, opts) {
       const { args } = buildSkillArgs(skillConfig, caseData, workDir, inputFile, opts.runtime);
       const output = execSkill(opts.runtime, skillConfig.script, args);
       const lastLine = output.trim().split('\n').pop();
+      if (caseData.expectError) {
+        log(skillName, false, 'expected non-zero exit but got success');
+        result.errors.push(`${skillName}: expected error but got success`);
+        return result;
+      }
       log(skillName, true, lastLine);
     } catch (e) {
       const detail = (e.stderr || e.stdout || e.message).trim();
+      if (caseData.expectError) {
+        if (typeof caseData.expectError === 'string' && !detail.includes(caseData.expectError)) {
+          log(skillName, false, `expected "${caseData.expectError}" in stderr, got: ${detail.substring(0, 200)}`);
+          result.errors.push(`${skillName}: stderr does not contain "${caseData.expectError}"`);
+          return result;
+        }
+        log(skillName, true, `(expected error) ${detail.substring(0, 100)}`);
+        result.passed = true;
+        return result;
+      }
       log(skillName, false, detail);
       result.errors.push(`${skillName} failed: ${detail.substring(0, 500)}`);
       return result;

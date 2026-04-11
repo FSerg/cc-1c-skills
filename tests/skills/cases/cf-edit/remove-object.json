@@ -2,9 +2,14 @@
   "name": "Удаление объекта из конфигурации",
   "preRun": [
     {
-      "script": "cf-edit/scripts/cf-edit",
-      "input": [{ "operation": "add-childObject", "value": "Catalog.Удаляемый ;; Catalog.Остающийся" }],
-      "args": { "-ConfigPath": "{workDir}", "-DefinitionFile": "{inputFile}" }
+      "script": "meta-compile/scripts/meta-compile",
+      "input": { "type": "Catalog", "name": "Удаляемый" },
+      "args": { "-JsonPath": "{inputFile}", "-OutputDir": "{workDir}" }
+    },
+    {
+      "script": "meta-compile/scripts/meta-compile",
+      "input": { "type": "Catalog", "name": "Остающийся" },
+      "args": { "-JsonPath": "{inputFile}", "-OutputDir": "{workDir}" }
     }
   ],
   "input": [

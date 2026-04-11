@@ -2,9 +2,14 @@
   "name": "Замена списка ролей по умолчанию",
   "preRun": [
     {
-      "script": "cf-edit/scripts/cf-edit",
-      "input": [{ "operation": "add-childObject", "value": "Role.ПолныеПрава ;; Role.Администратор" }],
-      "args": { "-ConfigPath": "{workDir}", "-DefinitionFile": "{inputFile}" }
+      "script": "role-compile/scripts/role-compile",
+      "input": { "name": "ПолныеПрава" },
+      "args": { "-JsonPath": "{inputFile}", "-OutputDir": "{workDir}" }
+    },
+    {
+      "script": "role-compile/scripts/role-compile",
+      "input": { "name": "Администратор" },
+      "args": { "-JsonPath": "{inputFile}", "-OutputDir": "{workDir}" }
     }
   ],
   "input": [
