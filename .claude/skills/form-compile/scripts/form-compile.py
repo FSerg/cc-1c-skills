@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# form-compile v1.5 — Compile 1C managed form from JSON or object metadata
+# form-compile v1.6 — Compile 1C managed form from JSON or object metadata
 # Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 import argparse
 import copy
@@ -84,28 +84,28 @@ def parse_object_meta(object_path):
     def is_ref_type(t):
         return bool(re.search(r'Ref\.', t) or re.search(r'\u0441\u0441\u044b\u043b\u043a\u0430\.', t))
 
-    def extract_attrs(parent_node):
-        """Extract attribute list from ChildObjects."""
+    def extract_fields(parent_node, tag_name='Attribute'):
+        """Extract field list from ChildObjects by tag name (Attribute, Dimension, Resource, AccountingFlag, ExtDimensionAccountingFlag)."""
         result = []
         if parent_node is None:
             return result
-        for attr_node in _et_findall(parent_node, 'md:Attribute'):
-            ap = _et_find(attr_node, 'md:Properties')
-            a_name = _et_text(ap, 'md:Name')
-            a_syn_node = _et_find(ap, "md:Synonym/v8:item[v8:lang='ru']/v8:content")
-            a_syn = a_syn_node.text if a_syn_node is not None and a_syn_node.text else a_name
-            a_type_node = _et_find(ap, 'md:Type')
-            a_type = extract_type(a_type_node)
+        for field_node in _et_findall(parent_node, f'md:{tag_name}'):
+            fp = _et_find(field_node, 'md:Properties')
+            f_name = _et_text(fp, 'md:Name')
+            f_syn_node = _et_find(fp, "md:Synonym/v8:item[v8:lang='ru']/v8:content")
+            f_syn = f_syn_node.text if f_syn_node is not None and f_syn_node.text else f_name
+            f_type_node = _et_find(fp, 'md:Type')
+            f_type = extract_type(f_type_node)
             result.append({
-                'Name': a_name,
-                'Synonym': a_syn,
-                'Type': a_type,
-                'IsRef': is_ref_type(a_type),
+                'Name': f_name,
+                'Synonym': f_syn,
+                'Type': f_type,
+                'IsRef': is_ref_type(f_type),
             })
         return result
 
     # Attributes
-    attributes = extract_attrs(child_objs)
+    attributes = extract_fields(child_objs, 'Attribute')
 
     # Tabular sections
     tabular_sections = []
@@ -116,7 +116,7 @@ def parse_object_meta(object_path):
             ts_syn_node = _et_find(tsp, "md:Synonym/v8:item[v8:lang='ru']/v8:content")
             ts_syn = ts_syn_node.text if ts_syn_node is not None and ts_syn_node.text else ts_name
             ts_co = _et_find(ts_node, 'md:ChildObjects')
-            ts_cols = extract_attrs(ts_co)
+            ts_cols = extract_fields(ts_co, 'Attribute')
             tabular_sections.append({
                 'Name': ts_name,
                 'Synonym': ts_syn,
@@ -149,6 +149,54 @@ def parse_object_meta(object_path):
             if ow.text:
                 owners.append(ow.text)
         meta['Owners'] = owners
+    elif obj_type == 'InformationRegister':
+        meta['Dimensions'] = extract_fields(child_objs, 'Dimension')
+        meta['Resources'] = extract_fields(child_objs, 'Resource')
+        prd_node = _et_find(props_node, 'md:InformationRegisterPeriodicity')
+        meta['Periodicity'] = prd_node.text if prd_node is not None and prd_node.text else 'Nonperiodical'
+        wm_node = _et_find(props_node, 'md:WriteMode')
+        meta['WriteMode'] = wm_node.text if wm_node is not None and wm_node.text else 'Independent'
+    elif obj_type == 'AccumulationRegister':
+        meta['Dimensions'] = extract_fields(child_objs, 'Dimension')
+        meta['Resources'] = extract_fields(child_objs, 'Resource')
+        rt_node = _et_find(props_node, 'md:RegisterType')
+        meta['RegisterType'] = rt_node.text if rt_node is not None and rt_node.text else 'Balances'
+    elif obj_type == 'ChartOfCharacteristicTypes':
+        cl_node = _et_find(props_node, 'md:CodeLength')
+        meta['CodeLength'] = int(cl_node.text) if cl_node is not None and cl_node.text else 0
+        dl_node = _et_find(props_node, 'md:DescriptionLength')
+        meta['DescriptionLength'] = int(dl_node.text) if dl_node is not None and dl_node.text else 0
+        hi_node = _et_find(props_node, 'md:Hierarchical')
+        meta['Hierarchical'] = (hi_node is not None and hi_node.text == 'true')
+        ht_node = _et_find(props_node, 'md:HierarchyType')
+        meta['HierarchyType'] = ht_node.text if ht_node is not None and ht_node.text else 'HierarchyFoldersAndItems'
+        owners = []
+        for ow in _et_findall(props_node, 'md:Owners/xr:Item'):
+            if ow.text:
+                owners.append(ow.text)
+        meta['Owners'] = owners
+        meta['HasValueType'] = True
+    elif obj_type == 'ExchangePlan':
+        cl_node = _et_find(props_node, 'md:CodeLength')
+        meta['CodeLength'] = int(cl_node.text) if cl_node is not None and cl_node.text else 0
+        dl_node = _et_find(props_node, 'md:DescriptionLength')
+        meta['DescriptionLength'] = int(dl_node.text) if dl_node is not None and dl_node.text else 0
+        meta['Hierarchical'] = False
+        meta['HierarchyType'] = None
+        meta['Owners'] = []
+    elif obj_type == 'ChartOfAccounts':
+        cl_node = _et_find(props_node, 'md:CodeLength')
+        meta['CodeLength'] = int(cl_node.text) if cl_node is not None and cl_node.text else 0
+        dl_node = _et_find(props_node, 'md:DescriptionLength')
+        meta['DescriptionLength'] = int(dl_node.text) if dl_node is not None and dl_node.text else 0
+        meta['Hierarchical'] = True
+        ht_node = _et_find(props_node, 'md:HierarchyType')
+        meta['HierarchyType'] = ht_node.text if ht_node is not None and ht_node.text else 'HierarchyFoldersAndItems'
+        meta['Owners'] = []
+        max_ed_node = _et_find(props_node, 'md:MaxExtDimensionCount')
+        meta['MaxExtDimensionCount'] = int(max_ed_node.text) if max_ed_node is not None and max_ed_node.text else 0
+        meta['AccountingFlags'] = extract_fields(child_objs, 'AccountingFlag')
+        meta['ExtDimensionAccountingFlags'] = extract_fields(child_objs, 'ExtDimensionAccountingFlag')
 
     return meta
 
@@ -216,6 +264,41 @@ def load_preset(preset_name, script_dir, out_path_resolved):
             'basedOn': 'catalog.list', 'choiceMode': True,
             'properties': {'windowOpeningMode': 'LockOwnerWindow'},
         },
+        # --- Register defaults ---
+        'informationRegister.record': {
+            'fieldDefaults': {'ref': {'choiceButton': True}, 'boolean': {'element': 'check'}},
+            'properties': {'windowOpeningMode': 'LockOwnerWindow'},
+        },
+        'informationRegister.list': {
+            'columns': 'all', 'columnType': 'labelField',
+            'tableCommandBar': 'none', 'commandBar': 'auto',
+            'properties': {},
+        },
+        'accumulationRegister.list': {
+            'columns': 'all', 'columnType': 'labelField',
+            'tableCommandBar': 'none', 'commandBar': 'auto',
+            'properties': {},
+        },
+        # --- Catalog-like type defaults ---
+        'chartOfCharacteristicTypes.item': {'basedOn': 'catalog.item'},
+        'chartOfCharacteristicTypes.folder': {'basedOn': 'catalog.folder'},
+        'chartOfCharacteristicTypes.list': {'basedOn': 'catalog.list'},
+        'chartOfCharacteristicTypes.choice': {'basedOn': 'catalog.choice'},
+        'exchangePlan.item': {'basedOn': 'catalog.item'},
+        'exchangePlan.list': {'basedOn': 'catalog.list'},
+        'exchangePlan.choice': {'basedOn': 'catalog.choice'},
+        # --- ChartOfAccounts defaults ---
+        'chartOfAccounts.item': {
+            'parent': {'title': '\u041f\u043e\u0434\u0447\u0438\u043d\u0435\u043d \u0441\u0447\u0435\u0442\u0443'},
+            'fieldDefaults': {'ref': {'choiceButton': True}, 'boolean': {'element': 'check'}},
+            'properties': {},
+        },
+        'chartOfAccounts.folder': {
+            'parent': {'title': '\u041f\u043e\u0434\u0447\u0438\u043d\u0435\u043d \u0441\u0447\u0435\u0442\u0443'},
+            'properties': {'windowOpeningMode': 'LockOwnerWindow'},
+        },
+        'chartOfAccounts.list': {'basedOn': 'catalog.list'},
+        'chartOfAccounts.choice': {'basedOn': 'catalog.choice'},
     }
 
     # Try built-in preset
@@ -766,6 +849,403 @@ def generate_document_item_dsl(meta, p, fd):
             OrderedDict([('name', '\u041e\u0431\u044a\u0435\u043a\u0442'), ('type', f"DocumentObject.{meta['Name']}"), ('main', True)])
         ]),
     ])
+
+
+# --- InformationRegister DSL generators ---
+
+def generate_information_register_dsl(meta, preset_data, purpose):
+    p_key = f"informationRegister.{purpose.lower()}"
+    p = preset_data.get(p_key, {})
+    fd = p.get('fieldDefaults') or {'ref': {'choiceButton': True}, 'boolean': {'element': 'check'}}
+    dispatch = {
+        'Record': lambda: generate_information_register_record_dsl(meta, p, fd),
+        'List': lambda: generate_information_register_list_dsl(meta, p),
+    }
+    return dispatch[purpose]()
+
+
+def generate_information_register_record_dsl(meta, p, fd):
+    elements = OrderedDict()
+    is_periodic = meta.get('Periodicity') and meta['Periodicity'] != 'Nonperiodical'
+
+    # Period first (if periodic)
+    if is_periodic:
+        elements['\u041f\u0435\u0440\u0438\u043e\u0434'] = {'element': 'input', 'path': '\u0417\u0430\u043f\u0438\u0441\u044c.Period'}
+    # Dimensions
+    for dim in meta.get('Dimensions', []):
+        if not is_displayable_type(dim['Type']):
+            continue
+        elements[dim['Name']] = new_field_element(dim['Name'], f"\u0417\u0430\u043f\u0438\u0441\u044c.{dim['Name']}", dim['Type'], fd)
+    # Resources
+    for res in meta.get('Resources', []):
+        if not is_displayable_type(res['Type']):
+            continue
+        elements[res['Name']] = new_field_element(res['Name'], f"\u0417\u0430\u043f\u0438\u0441\u044c.{res['Name']}", res['Type'], fd)
+    # Attributes
+    for attr in meta['Attributes']:
+        if not is_displayable_type(attr['Type']):
+            continue
+        elements[attr['Name']] = new_field_element(attr['Name'], f"\u0417\u0430\u043f\u0438\u0441\u044c.{attr['Name']}", attr['Type'], fd)
+
+    props = OrderedDict([('windowOpeningMode', 'LockOwnerWindow')])
+    if p.get('properties'):
+        for k in p['properties']:
+            props[k] = p['properties'][k]
+
+    return OrderedDict([
+        ('title', meta['Synonym']),
+        ('properties', props),
+        ('elements', elements),
+        ('attributes', [
+            {'name': '\u0417\u0430\u043f\u0438\u0441\u044c', 'type': f"InformationRegisterRecordManager.{meta['Name']}", 'main': True, 'savedData': True}
+        ]),
+    ])
+
+
+def generate_information_register_list_dsl(meta, p):
+    is_periodic = meta.get('Periodicity') and meta['Periodicity'] != 'Nonperiodical'
+    is_recorder_subordinate = meta.get('WriteMode') == 'RecorderSubordinate'
+
+    columns = OrderedDict()
+    # Period
+    if is_periodic:
+        columns['\u041f\u0435\u0440\u0438\u043e\u0434'] = {'element': 'labelField', 'path': '\u0421\u043f\u0438\u0441\u043e\u043a.Period'}
+    # Recorder/LineNumber for subordinate registers
+    if is_recorder_subordinate:
+        columns['\u0420\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0442\u043e\u0440'] = {'element': 'labelField', 'path': '\u0421\u043f\u0438\u0441\u043e\u043a.Recorder'}
+        columns['\u041d\u043e\u043c\u0435\u0440\u0421\u0442\u0440\u043e\u043a\u0438'] = {'element': 'labelField', 'path': '\u0421\u043f\u0438\u0441\u043e\u043a.LineNumber'}
+    # Dimensions
+    for dim in meta.get('Dimensions', []):
+        if not is_displayable_type(dim['Type']):
+            continue
+        columns[dim['Name']] = {'element': 'labelField', 'path': f"\u0421\u043f\u0438\u0441\u043e\u043a.{dim['Name']}"}
+    # Resources
+    for res in meta.get('Resources', []):
+        if not is_displayable_type(res['Type']):
+            continue
+        el = 'labelField'
+        if re.match(r'^xs:boolean$|^Boolean$', res['Type']):
+            el = 'checkBox'
+        columns[res['Name']] = {'element': el, 'path': f"\u0421\u043f\u0438\u0441\u043e\u043a.{res['Name']}"}
+    # Attributes
+    for attr in meta['Attributes']:
+        if not is_displayable_type(attr['Type']):
+            continue
+        el = 'labelField'
+        if re.match(r'^xs:boolean$|^Boolean$', attr['Type']):
+            el = 'checkBox'
+        columns[attr['Name']] = {'element': el, 'path': f"\u0421\u043f\u0438\u0441\u043e\u043a.{attr['Name']}"}
+
+    table_el = OrderedDict([
+        ('element', 'table'),
+        ('path', '\u0421\u043f\u0438\u0441\u043e\u043a'),
+        ('commandBarLocation', 'none'),
+        ('autoCommandBar', {'autofill': False}),
+        ('columns', columns),
+    ])
+
+    props = OrderedDict()
+    if p.get('properties'):
+        for k in p['properties']:
+            props[k] = p['properties'][k]
+
+    return OrderedDict([
+        ('title', meta['Synonym']),
+        ('properties', props),
+        ('elements', OrderedDict([('\u0421\u043f\u0438\u0441\u043e\u043a', table_el)])),
+        ('attributes', [
+            {'name': '\u0421\u043f\u0438\u0441\u043e\u043a', 'type': 'DynamicList', 'main': True, 'settings': {'mainTable': f"InformationRegister.{meta['Name']}", 'dynamicDataRead': True}}
+        ]),
+    ])
+
+
+# --- AccumulationRegister DSL generators ---
+
+def generate_accumulation_register_dsl(meta, preset_data, purpose):
+    p_key = f"accumulationRegister.{purpose.lower()}"
+    p = preset_data.get(p_key, {})
+    dispatch = {
+        'List': lambda: generate_accumulation_register_list_dsl(meta, p),
+    }
+    return dispatch[purpose]()
+
+
+def generate_accumulation_register_list_dsl(meta, p):
+    columns = OrderedDict()
+    # AccumulationRegisters always have Period, Recorder, LineNumber
+    columns['\u041f\u0435\u0440\u0438\u043e\u0434'] = {'element': 'labelField', 'path': '\u0421\u043f\u0438\u0441\u043e\u043a.Period'}
+    columns['\u0420\u0435\u0433\u0438\u0441\u0442\u0440\u0430\u0442\u043e\u0440'] = {'element': 'labelField', 'path': '\u0421\u043f\u0438\u0441\u043e\u043a.Recorder'}
+    columns['\u041d\u043e\u043c\u0435\u0440\u0421\u0442\u0440\u043e\u043a\u0438'] = {'element': 'labelField', 'path': '\u0421\u043f\u0438\u0441\u043e\u043a.LineNumber'}
+    # Dimensions
+    for dim in meta.get('Dimensions', []):
+        if not is_displayable_type(dim['Type']):
+            continue
+        columns[dim['Name']] = {'element': 'labelField', 'path': f"\u0421\u043f\u0438\u0441\u043e\u043a.{dim['Name']}"}
+    # Resources
+    for res in meta.get('Resources', []):
+        if not is_displayable_type(res['Type']):
+            continue
+        el = 'labelField'
+        if re.match(r'^xs:boolean$|^Boolean$', res['Type']):
+            el = 'checkBox'
+        columns[res['Name']] = {'element': el, 'path': f"\u0421\u043f\u0438\u0441\u043e\u043a.{res['Name']}"}
+    # Attributes
+    for attr in meta['Attributes']:
+        if not is_displayable_type(attr['Type']):
+            continue
+        el = 'labelField'
+        if re.match(r'^xs:boolean$|^Boolean$', attr['Type']):
+            el = 'checkBox'
+        columns[attr['Name']] = {'element': el, 'path': f"\u0421\u043f\u0438\u0441\u043e\u043a.{attr['Name']}"}
+
+    table_el = OrderedDict([
+        ('element', 'table'),
+        ('path', '\u0421\u043f\u0438\u0441\u043e\u043a'),
+        ('commandBarLocation', 'none'),
+        ('autoCommandBar', {'autofill': False}),
+        ('columns', columns),
+    ])
+
+    props = OrderedDict()
+    if p.get('properties'):
+        for k in p['properties']:
+            props[k] = p['properties'][k]
+
+    return OrderedDict([
+        ('title', meta['Synonym']),
+        ('properties', props),
+        ('elements', OrderedDict([('\u0421\u043f\u0438\u0441\u043e\u043a', table_el)])),
+        ('attributes', [
+            {'name': '\u0421\u043f\u0438\u0441\u043e\u043a', 'type': 'DynamicList', 'main': True, 'settings': {'mainTable': f"AccumulationRegister.{meta['Name']}", 'dynamicDataRead': True}}
+        ]),
+    ])
+
+
+# --- ChartOfCharacteristicTypes (delegates to Catalog) ---
+
+def generate_chart_of_characteristic_types_dsl(meta, preset_data, purpose):
+    # Delegate to Catalog generators -- meta already has CodeLength, DescriptionLength, etc.
+    dsl = generate_catalog_dsl(meta, preset_data, purpose)
+
+    # Post-patch: replace Catalog types with ChartOfCharacteristicTypes types
+    cat_obj_type = f"CatalogObject.{meta['Name']}"
+    ccoct_obj_type = f"ChartOfCharacteristicTypesObject.{meta['Name']}"
+    cat_list_type = f"Catalog.{meta['Name']}"
+    ccoct_list_type = f"ChartOfCharacteristicTypes.{meta['Name']}"
+
+    for a in dsl['attributes']:
+        if a.get('type') == cat_obj_type:
+            a['type'] = ccoct_obj_type
+        if a.get('type') == 'DynamicList' and a.get('settings') and a['settings'].get('mainTable') == cat_list_type:
+            a['settings']['mainTable'] = ccoct_list_type
+
+    # For Item forms: inject ValueType field after Description/ГруппаКодНаименование
+    if purpose == 'Item' and dsl.get('elements'):
+        vt_el = OrderedDict([('input', '\u0422\u0438\u043f\u0417\u043d\u0430\u0447\u0435\u043d\u0438\u044f'), ('path', '\u041e\u0431\u044a\u0435\u043a\u0442.ValueType')])
+        els = dsl['elements']
+        if isinstance(els, list):
+            inserted = False
+            new_els = []
+            for el in els:
+                new_els.append(el)
+                if not inserted and isinstance(el, dict):
+                    name = el.get('input') or el.get('group') or ''
+                    if name in ('\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435', '\u0413\u0440\u0443\u043f\u043f\u0430\u041a\u043e\u0434\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435'):
+                        new_els.append(vt_el)
+                        inserted = True
+            if not inserted:
+                new_els.append(vt_el)
+            dsl['elements'] = new_els
+
+    return dsl
+
+
+# --- ExchangePlan (delegates to Catalog) ---
+
+def generate_exchange_plan_dsl(meta, preset_data, purpose):
+    # ExchangePlans are not hierarchical and have no Folder form
+    dsl = generate_catalog_dsl(meta, preset_data, purpose)
+
+    # Post-patch: replace Catalog types with ExchangePlan types
+    cat_obj_type = f"CatalogObject.{meta['Name']}"
+    ep_obj_type = f"ExchangePlanObject.{meta['Name']}"
+    cat_list_type = f"Catalog.{meta['Name']}"
+    ep_list_type = f"ExchangePlan.{meta['Name']}"
+
+    for a in dsl['attributes']:
+        if a.get('type') == cat_obj_type:
+            a['type'] = ep_obj_type
+        if a.get('type') == 'DynamicList' and a.get('settings') and a['settings'].get('mainTable') == cat_list_type:
+            a['settings']['mainTable'] = ep_list_type
+
+    # For Item forms: inject SentNo, ReceivedNo after Code/Description
+    if purpose == 'Item' and dsl.get('elements'):
+        sent_el = OrderedDict([('input', '\u041d\u043e\u043c\u0435\u0440\u041e\u0442\u043f\u0440\u0430\u0432\u043b\u0435\u043d\u043d\u043e\u0433\u043e'), ('path', '\u041e\u0431\u044a\u0435\u043a\u0442.SentNo'), ('readOnly', True)])
+        recv_el = OrderedDict([('input', '\u041d\u043e\u043c\u0435\u0440\u041f\u0440\u0438\u043d\u044f\u0442\u043e\u0433\u043e'), ('path', '\u041e\u0431\u044a\u0435\u043a\u0442.ReceivedNo'), ('readOnly', True)])
+        els = dsl['elements']
+        if isinstance(els, list):
+            inserted = False
+            new_els = []
+            for el in els:
+                new_els.append(el)
+                if not inserted and isinstance(el, dict):
+                    name = el.get('input') or el.get('group') or ''
+                    if name in ('\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435', '\u0413\u0440\u0443\u043f\u043f\u0430\u041a\u043e\u0434\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435'):
+                        new_els.append(sent_el)
+                        new_els.append(recv_el)
+                        inserted = True
+            if not inserted:
+                new_els.append(sent_el)
+                new_els.append(recv_el)
+            dsl['elements'] = new_els
+
+    return dsl
+
+
+# --- ChartOfAccounts DSL generators ---
+
+def generate_chart_of_accounts_dsl(meta, preset_data, purpose):
+    p_key = f"chartOfAccounts.{purpose.lower()}"
+    p = preset_data.get(p_key, {})
+    fd = p.get('fieldDefaults') or {'ref': {'choiceButton': True}, 'boolean': {'element': 'check'}}
+    dispatch = {
+        'Item': lambda: generate_chart_of_accounts_item_dsl(meta, p, fd, preset_data),
+        'Folder': lambda: generate_chart_of_accounts_folder_dsl(meta, p),
+        'List': lambda: generate_chart_of_accounts_list_dsl(meta, preset_data),
+        'Choice': lambda: generate_chart_of_accounts_choice_dsl(meta, preset_data),
+    }
+    return dispatch[purpose]()
+
+
+def generate_chart_of_accounts_item_dsl(meta, p, fd, preset_data):
+    elements = OrderedDict()
+
+    # Header: Code + Parent
+    header_left = OrderedDict()
+    if meta.get('CodeLength', 0) > 0:
+        header_left['\u041a\u043e\u0434'] = {'element': 'input', 'path': '\u041e\u0431\u044a\u0435\u043a\u0442.Code'}
+    header_right = OrderedDict()
+    if meta.get('Hierarchical'):
+        parent_title = (p.get('parent') or {}).get('title', '\u041f\u043e\u0434\u0447\u0438\u043d\u0435\u043d \u0441\u0447\u0435\u0442\u0443')
+        header_right['\u0420\u043e\u0434\u0438\u0442\u0435\u043b\u044c'] = {'element': 'input', 'path': '\u041e\u0431\u044a\u0435\u043a\u0442.Parent', 'title': parent_title}
+
+    if len(header_right) > 0:
+        elements['\u0413\u0440\u0443\u043f\u043f\u0430\u0428\u0430\u043f\u043a\u0430'] = OrderedDict([
+            ('element', 'group'), ('groupType', 'horizontal'), ('showTitle', False), ('representation', 'none'),
+            ('elements', OrderedDict([
+                ('\u0413\u0440\u0443\u043f\u043f\u0430\u0428\u0430\u043f\u043a\u0430\u041b\u0435\u0432\u043e', OrderedDict([('element', 'group'), ('groupType', 'vertical'), ('showTitle', False), ('elements', header_left)])),
+                ('\u0413\u0440\u0443\u043f\u043f\u0430\u0428\u0430\u043f\u043a\u0430\u041f\u0440\u0430\u0432\u043e', OrderedDict([('element', 'group'), ('groupType', 'vertical'), ('showTitle', False), ('elements', header_right)])),
+            ])),
+        ])
+    elif len(header_left) > 0:
+        for k, v in header_left.items():
+            elements[k] = v
+
+    # Description
+    if meta.get('DescriptionLength', 0) > 0:
+        elements['\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435'] = {'element': 'input', 'path': '\u041e\u0431\u044a\u0435\u043a\u0442.Description'}
+
+    # OffBalance
+    elements['\u0417\u0430\u0431\u0430\u043b\u0430\u043d\u0441\u043e\u0432\u044b\u0439'] = {'element': 'check', 'path': '\u041e\u0431\u044a\u0435\u043a\u0442.OffBalance'}
+
+    # AccountingFlags as checkboxes
+    if meta.get('AccountingFlags') and len(meta['AccountingFlags']) > 0:
+        flag_elements = OrderedDict()
+        for flag in meta['AccountingFlags']:
+            flag_elements[flag['Name']] = {'element': 'check', 'path': f"\u041e\u0431\u044a\u0435\u043a\u0442.{flag['Name']}"}
+        elements['\u0413\u0440\u0443\u043f\u043f\u0430\u041f\u0440\u0438\u0437\u043d\u0430\u043a\u0438\u0423\u0447\u0435\u0442\u0430'] = OrderedDict([
+            ('element', 'group'), ('groupType', 'vertical'), ('title', '\u041f\u0440\u0438\u0437\u043d\u0430\u043a\u0438 \u0443\u0447\u0435\u0442\u0430'),
+            ('elements', flag_elements),
+        ])
+
+    # ExtDimensionTypes table
+    if meta.get('MaxExtDimensionCount', 0) > 0:
+        ed_cols = OrderedDict()
+        ed_cols['\u0412\u0438\u0434\u0421\u0443\u0431\u043a\u043e\u043d\u0442\u043e'] = {'element': 'input', 'path': '\u041e\u0431\u044a\u0435\u043a\u0442.ExtDimensionTypes.ExtDimensionType'}
+        ed_cols['\u0422\u043e\u043b\u044c\u043a\u043e\u041e\u0431\u043e\u0440\u043e\u0442\u044b'] = {'element': 'check', 'path': '\u041e\u0431\u044a\u0435\u043a\u0442.ExtDimensionTypes.TurnoversOnly'}
+        if meta.get('ExtDimensionAccountingFlags'):
+            for ed_flag in meta['ExtDimensionAccountingFlags']:
+                ed_cols[ed_flag['Name']] = {'element': 'check', 'path': f"\u041e\u0431\u044a\u0435\u043a\u0442.ExtDimensionTypes.{ed_flag['Name']}"}
+        elements['\u0412\u0438\u0434\u044b\u0421\u0443\u0431\u043a\u043e\u043d\u0442\u043e'] = OrderedDict([
+            ('element', 'table'),
+            ('path', '\u041e\u0431\u044a\u0435\u043a\u0442.ExtDimensionTypes'),
+            ('columns', ed_cols),
+        ])
+
+    # Custom attributes
+    for attr in meta['Attributes']:
+        if not is_displayable_type(attr['Type']):
+            continue
+        elements[attr['Name']] = new_field_element(attr['Name'], f"\u041e\u0431\u044a\u0435\u043a\u0442.{attr['Name']}", attr['Type'], fd)
+
+    # Tabular sections
+    ts_exclude = ['\u0414\u043e\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u044c\u043d\u044b\u0435\u0420\u0435\u043a\u0432\u0438\u0437\u0438\u0442\u044b', '\u041f\u0440\u0435\u0434\u0441\u0442\u0430\u0432\u043b\u0435\u043d\u0438\u044f']
+    for ts in meta['TabularSections']:
+        if ts['Name'] in ts_exclude:
+            continue
+        ts_cols = OrderedDict()
+        for col in ts['Columns']:
+            if not is_displayable_type(col['Type']):
+                continue
+            ts_cols[f"{ts['Name']}{col['Name']}"] = new_field_element(col['Name'], f"\u041e\u0431\u044a\u0435\u043a\u0442.{ts['Name']}.{col['Name']}", col['Type'], fd)
+        elements[ts['Name']] = OrderedDict([('element', 'table'), ('path', f"\u041e\u0431\u044a\u0435\u043a\u0442.{ts['Name']}"), ('columns', ts_cols)])
+
+    props = OrderedDict()
+    if p.get('properties'):
+        for k in p['properties']:
+            props[k] = p['properties'][k]
+
+    return OrderedDict([
+        ('title', meta['Synonym']),
+        ('properties', props),
+        ('elements', elements),
+        ('attributes', [
+            {'name': '\u041e\u0431\u044a\u0435\u043a\u0442', 'type': f"ChartOfAccountsObject.{meta['Name']}", 'main': True, 'savedData': True}
+        ]),
+    ])
+
+
+def generate_chart_of_accounts_folder_dsl(meta, p):
+    elements = OrderedDict()
+    if meta.get('CodeLength', 0) > 0:
+        elements['\u041a\u043e\u0434'] = {'element': 'input', 'path': '\u041e\u0431\u044a\u0435\u043a\u0442.Code'}
+    if meta.get('DescriptionLength', 0) > 0:
+        elements['\u041d\u0430\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u043d\u0438\u0435'] = {'element': 'input', 'path': '\u041e\u0431\u044a\u0435\u043a\u0442.Description'}
+    if meta.get('Hierarchical'):
+        parent_title = (p.get('parent') or {}).get('title', '\u041f\u043e\u0434\u0447\u0438\u043d\u0435\u043d \u0441\u0447\u0435\u0442\u0443')
+        elements['\u0420\u043e\u0434\u0438\u0442\u0435\u043b\u044c'] = {'element': 'input', 'path': '\u041e\u0431\u044a\u0435\u043a\u0442.Parent', 'title': parent_title}
+
+    props = OrderedDict([('windowOpeningMode', 'LockOwnerWindow')])
+    if p.get('properties'):
+        for k in p['properties']:
+            props[k] = p['properties'][k]
+
+    return OrderedDict([
+        ('title', meta['Synonym']),
+        ('useForFoldersAndItems', 'Folders'),
+        ('properties', props),
+        ('elements', elements),
+        ('attributes', [
+            {'name': '\u041e\u0431\u044a\u0435\u043a\u0442', 'type': f"ChartOfAccountsObject.{meta['Name']}", 'main': True, 'savedData': True}
+        ]),
+    ])
+
+
+def generate_chart_of_accounts_list_dsl(meta, preset_data):
+    # Delegate to Catalog List and patch types
+    dsl = generate_catalog_dsl(meta, preset_data, 'List')
+    for a in dsl['attributes']:
+        if a.get('type') == 'DynamicList' and a.get('settings') and a['settings'].get('mainTable') == f"Catalog.{meta['Name']}":
+            a['settings']['mainTable'] = f"ChartOfAccounts.{meta['Name']}"
+    return dsl
+
+
+def generate_chart_of_accounts_choice_dsl(meta, preset_data):
+    dsl = generate_catalog_dsl(meta, preset_data, 'Choice')
+    for a in dsl['attributes']:
+        if a.get('type') == 'DynamicList' and a.get('settings') and a['settings'].get('mainTable') == f"Catalog.{meta['Name']}":
+            a['settings']['mainTable'] = f"ChartOfAccounts.{meta['Name']}"
+    return dsl
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1817,6 +2297,95 @@ def detect_format_version(d):
     return "2.17"
 
 
+def _normalize_elements(defn):
+    """Convert dict-style elements from --from-object generators to list-style expected by compiler.
+    Generator format:  elements = {"ИмяЭлемента": {"element": "input", "path": "..."}, ...}
+    Compiler format:   elements = [{"input": "ИмяЭлемента", "path": "..."}, ...]
+    Also handles nested 'elements' in groups and 'columns' in tables recursively.
+    """
+    def convert_elements(els):
+        if isinstance(els, list):
+            # Already list format — but may have nested dicts inside groups
+            result = []
+            for el in els:
+                if isinstance(el, dict):
+                    el = dict(el)  # copy
+                    if 'elements' in el and isinstance(el['elements'], dict):
+                        el['elements'] = convert_elements(el['elements'])
+                    if 'columns' in el and isinstance(el['columns'], dict):
+                        el['columns'] = convert_columns(el['columns'])
+                result.append(el)
+            return result
+        if isinstance(els, dict):
+            result = []
+            for name, props in els.items():
+                if not isinstance(props, dict):
+                    continue
+                new_el = {}
+                el_type = props.get('element', 'input')
+                # Map element type to the key name used in JSON DSL
+                type_map = {
+                    'input': 'input', 'check': 'check', 'labelField': 'labelField',
+                    'table': 'table', 'group': 'group', 'pages': 'pages',
+                    'page': 'page', 'label': 'label', 'button': 'button',
+                    'checkBox': 'check', 'radioButton': 'radioButton',
+                    'pictureField': 'pictureField',
+                }
+                mapped_type = type_map.get(el_type, el_type)
+                new_el[mapped_type] = name
+                for k, v in props.items():
+                    if k == 'element':
+                        continue
+                    if k == 'elements' and isinstance(v, dict):
+                        new_el['elements'] = convert_elements(v)
+                    elif k == 'columns' and isinstance(v, dict):
+                        new_el['columns'] = convert_columns(v)
+                    elif k == 'groupType':
+                        # groupType → group property in DSL
+                        new_el['group'] = v
+                    elif k == 'showTitle':
+                        new_el['showTitle'] = v
+                    elif k == 'representation':
+                        new_el['representation'] = v
+                    elif k == 'autoCommandBar':
+                        new_el['autoCommandBar'] = v
+                    elif k == 'commandBarLocation':
+                        new_el['commandBarLocation'] = v
+                    else:
+                        new_el[k] = v
+                result.append(new_el)
+            return result
+        return els
+
+    def convert_columns(cols):
+        if isinstance(cols, list):
+            return cols
+        if isinstance(cols, dict):
+            result = []
+            for name, props in cols.items():
+                if not isinstance(props, dict):
+                    continue
+                new_col = {}
+                el_type = props.get('element', 'input')
+                type_map = {
+                    'input': 'input', 'check': 'check', 'labelField': 'labelField',
+                    'checkBox': 'check',
+                }
+                mapped_type = type_map.get(el_type, el_type)
+                new_col[mapped_type] = name
+                for k, v in props.items():
+                    if k == 'element':
+                        continue
+                    new_col[k] = v
+                result.append(new_col)
+            return result
+        return cols
+
+    if 'elements' in defn:
+        defn['elements'] = convert_elements(defn['elements'])
+    return defn
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
@@ -1839,6 +2408,9 @@ def main():
         '\u0424\u043e\u0440\u043c\u0430\u0421\u043f\u0438\u0441\u043a\u0430': 'List',                          # ФормаСписка
         '\u0424\u043e\u0440\u043c\u0430\u0412\u044b\u0431\u043e\u0440\u0430': 'Choice',                        # ФормаВыбора
         '\u0424\u043e\u0440\u043c\u0430\u0413\u0440\u0443\u043f\u043f\u044b': 'Folder',                        # ФормаГруппы
+        '\u0424\u043e\u0440\u043c\u0430\u0417\u0430\u043f\u0438\u0441\u0438': 'Record',                       # ФормаЗаписи
+        '\u0424\u043e\u0440\u043c\u0430\u0421\u0447\u0435\u0442\u0430': 'Item',                               # ФормаСчета
+        '\u0424\u043e\u0440\u043c\u0430\u0423\u0437\u043b\u0430': 'Item',                                     # ФормаУзла
     }
 
     # Mutual exclusion validation
@@ -1916,18 +2488,32 @@ def main():
 
         preset_data = load_preset(args.Preset, os.path.dirname(os.path.abspath(__file__)), out_path_resolved)
 
-        supported = {'Document': ['Item', 'List', 'Choice'], 'Catalog': ['Item', 'Folder', 'List', 'Choice']}
+        supported = {
+            'Document': ['Item', 'List', 'Choice'],
+            'Catalog': ['Item', 'Folder', 'List', 'Choice'],
+            'InformationRegister': ['Record', 'List'],
+            'AccumulationRegister': ['List'],
+            'ChartOfCharacteristicTypes': ['Item', 'Folder', 'List', 'Choice'],
+            'ExchangePlan': ['Item', 'List', 'Choice'],
+            'ChartOfAccounts': ['Item', 'Folder', 'List', 'Choice'],
+        }
         if meta['Type'] not in supported:
-            print(f"Object type '{meta['Type']}' not supported. Supported: Document, Catalog.", file=sys.stderr)
+            print(f"Object type '{meta['Type']}' not supported. Supported: Document, Catalog, InformationRegister, AccumulationRegister, ChartOfCharacteristicTypes, ExchangePlan, ChartOfAccounts.", file=sys.stderr)
             sys.exit(1)
         if purpose not in supported[meta['Type']]:
             print(f"Purpose '{purpose}' not valid for {meta['Type']}. Valid: {', '.join(supported[meta['Type']])}", file=sys.stderr)
             sys.exit(1)
 
-        if meta['Type'] == 'Document':
-            dsl = generate_document_dsl(meta, preset_data, purpose)
-        else:
-            dsl = generate_catalog_dsl(meta, preset_data, purpose)
+        dsl_dispatch = {
+            'Document': generate_document_dsl,
+            'Catalog': generate_catalog_dsl,
+            'InformationRegister': generate_information_register_dsl,
+            'AccumulationRegister': generate_accumulation_register_dsl,
+            'ChartOfCharacteristicTypes': generate_chart_of_characteristic_types_dsl,
+            'ExchangePlan': generate_exchange_plan_dsl,
+            'ChartOfAccounts': generate_chart_of_accounts_dsl,
+        }
+        dsl = dsl_dispatch[meta['Type']](meta, preset_data, purpose)
 
         if args.EmitDsl:
             dsl_path = args.EmitDsl if os.path.isabs(args.EmitDsl) else os.path.join(os.getcwd(), args.EmitDsl)
@@ -1937,6 +2523,8 @@ def main():
             print(f"[from-object] DSL saved: {dsl_path}")
 
         defn = json.loads(json.dumps(dsl))  # normalize OrderedDict to regular dict
+        # Convert dict-style elements (from generators) to list-style (expected by compiler)
+        defn = _normalize_elements(defn)
     else:
         # --- 1. Load and validate JSON ---
         json_path = args.JsonPath

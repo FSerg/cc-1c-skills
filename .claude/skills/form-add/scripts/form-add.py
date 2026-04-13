@@ -93,7 +93,7 @@ def main():
     supported_types = [
         "Document", "Catalog", "DataProcessor", "Report",
         "ExternalDataProcessor", "ExternalReport",
-        "InformationRegister", "ChartOfAccounts", "ChartOfCharacteristicTypes",
+        "InformationRegister", "AccumulationRegister", "ChartOfAccounts", "ChartOfCharacteristicTypes",
         "ExchangePlan", "BusinessProcess", "Task",
     ]
 
@@ -310,6 +310,7 @@ def main():
             "BusinessProcess": "BusinessProcessObject",
             "Task": "TaskObject",
             "InformationRegister": "InformationRegisterRecordManager",
+            "AccumulationRegister": "AccumulationRegisterRecordSet",
         }
 
         main_attr_type = f"{attr_type_map[object_type]}.{object_name}"

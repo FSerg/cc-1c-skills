@@ -73,7 +73,7 @@ if (-not $metaDataObject) {
 $supportedTypes = @(
 	"Document", "Catalog", "DataProcessor", "Report",
 	"ExternalDataProcessor", "ExternalReport",
-	"InformationRegister", "ChartOfAccounts", "ChartOfCharacteristicTypes",
+	"InformationRegister", "AccumulationRegister", "ChartOfAccounts", "ChartOfCharacteristicTypes",
 	"ExchangePlan", "BusinessProcess", "Task"
 )
 
@@ -280,6 +280,7 @@ if ($Purpose -eq "List" -or $Purpose -eq "Choice") {
 		"BusinessProcess"             = "BusinessProcessObject"
 		"Task"                        = "TaskObject"
 		"InformationRegister"         = "InformationRegisterRecordManager"
+		"AccumulationRegister"        = "AccumulationRegisterRecordSet"
 	}
 
 	$mainAttrType = "$($attrTypeMap[$objectType]).$objectName"

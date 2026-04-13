@@ -1,4 +1,4 @@
-﻿# form-compile v1.5 — Compile 1C managed form from JSON or object metadata
+﻿# form-compile v1.6 — Compile 1C managed form from JSON or object metadata
 # Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 param(
 	[string]$JsonPath,
@@ -65,30 +65,30 @@ function Parse-ObjectMeta([string]$ObjectPath) {
 		return ($t -match 'Ref\.' -or $t -match 'ссылка\.')
 	}
 
-	# Helper: extract attribute list from ChildObjects
-	$extractAttrs = {
-		param($parentNode)
+	# Helper: extract field list from ChildObjects by tag name (Attribute, Dimension, Resource, AccountingFlag, ExtDimensionAccountingFlag)
+	$extractFields = {
+		param($parentNode, [string]$tagName)
 		$result = @()
 		if (-not $parentNode) { return $result }
-		foreach ($attrNode in $parentNode.SelectNodes("md:Attribute", $ns)) {
-			$ap = $attrNode.SelectSingleNode("md:Properties", $ns)
-			$aName = $ap.SelectSingleNode("md:Name", $ns).InnerText
-			$aSynNode = $ap.SelectSingleNode("md:Synonym/v8:item[v8:lang='ru']/v8:content", $ns)
-			$aSyn = if ($aSynNode) { $aSynNode.InnerText } else { $aName }
-			$aTypeNode = $ap.SelectSingleNode("md:Type", $ns)
-			$aType = & $extractType $aTypeNode
+		foreach ($fieldNode in $parentNode.SelectNodes("md:$tagName", $ns)) {
+			$fp = $fieldNode.SelectSingleNode("md:Properties", $ns)
+			$fName = $fp.SelectSingleNode("md:Name", $ns).InnerText
+			$fSynNode = $fp.SelectSingleNode("md:Synonym/v8:item[v8:lang='ru']/v8:content", $ns)
+			$fSyn = if ($fSynNode) { $fSynNode.InnerText } else { $fName }
+			$fTypeNode = $fp.SelectSingleNode("md:Type", $ns)
+			$fType = & $extractType $fTypeNode
 			$result += @{
-				Name = $aName
-				Synonym = $aSyn
-				Type = $aType
-				IsRef = (& $isRefType $aType)
+				Name = $fName
+				Synonym = $fSyn
+				Type = $fType
+				IsRef = (& $isRefType $fType)
 			}
 		}
 		return $result
 	}
 
 	# Attributes
-	$attributes = @(& $extractAttrs $childObjs)
+	$attributes = @(& $extractFields $childObjs "Attribute")
 
 	# Tabular sections
 	$tabularSections = @()
@@ -99,7 +99,7 @@ function Parse-ObjectMeta([string]$ObjectPath) {
 			$tsSynNode = $tsp.SelectSingleNode("md:Synonym/v8:item[v8:lang='ru']/v8:content", $ns)
 			$tsSyn = if ($tsSynNode) { $tsSynNode.InnerText } else { $tsName }
 			$tsCo = $tsNode.SelectSingleNode("md:ChildObjects", $ns)
-			$tsCols = @(& $extractAttrs $tsCo)
+			$tsCols = @(& $extractFields $tsCo "Attribute")
 			$tabularSections += @{
 				Name = $tsName
 				Synonym = $tsSyn
@@ -137,6 +137,59 @@ function Parse-ObjectMeta([string]$ObjectPath) {
 				$owners += $ow.InnerText
 			}
 			$meta.Owners = $owners
+		}
+		"InformationRegister" {
+			$meta.Dimensions = @(& $extractFields $childObjs "Dimension")
+			$meta.Resources  = @(& $extractFields $childObjs "Resource")
+			$prdNode = $propsNode.SelectSingleNode("md:InformationRegisterPeriodicity", $ns)
+			$meta.Periodicity = if ($prdNode) { $prdNode.InnerText } else { "Nonperiodical" }
+			$wmNode = $propsNode.SelectSingleNode("md:WriteMode", $ns)
+			$meta.WriteMode = if ($wmNode) { $wmNode.InnerText } else { "Independent" }
+		}
+		"AccumulationRegister" {
+			$meta.Dimensions = @(& $extractFields $childObjs "Dimension")
+			$meta.Resources  = @(& $extractFields $childObjs "Resource")
+			$rtNode = $propsNode.SelectSingleNode("md:RegisterType", $ns)
+			$meta.RegisterType = if ($rtNode) { $rtNode.InnerText } else { "Balances" }
+		}
+		"ChartOfCharacteristicTypes" {
+			$clNode = $propsNode.SelectSingleNode("md:CodeLength", $ns)
+			$meta.CodeLength = if ($clNode) { [int]$clNode.InnerText } else { 0 }
+			$dlNode = $propsNode.SelectSingleNode("md:DescriptionLength", $ns)
+			$meta.DescriptionLength = if ($dlNode) { [int]$dlNode.InnerText } else { 0 }
+			$hiNode = $propsNode.SelectSingleNode("md:Hierarchical", $ns)
+			$meta.Hierarchical = ($hiNode -and $hiNode.InnerText -eq "true")
+			$htNode = $propsNode.SelectSingleNode("md:HierarchyType", $ns)
+			$meta.HierarchyType = if ($htNode) { $htNode.InnerText } else { "HierarchyFoldersAndItems" }
+			$owners = @()
+			foreach ($ow in $propsNode.SelectNodes("md:Owners/xr:Item", $ns)) {
+				$owners += $ow.InnerText
+			}
+			$meta.Owners = $owners
+			$meta.HasValueType = $true
+		}
+		"ExchangePlan" {
+			$clNode = $propsNode.SelectSingleNode("md:CodeLength", $ns)
+			$meta.CodeLength = if ($clNode) { [int]$clNode.InnerText } else { 0 }
+			$dlNode = $propsNode.SelectSingleNode("md:DescriptionLength", $ns)
+			$meta.DescriptionLength = if ($dlNode) { [int]$dlNode.InnerText } else { 0 }
+			$meta.Hierarchical = $false
+			$meta.HierarchyType = $null
+			$meta.Owners = @()
+		}
+		"ChartOfAccounts" {
+			$clNode = $propsNode.SelectSingleNode("md:CodeLength", $ns)
+			$meta.CodeLength = if ($clNode) { [int]$clNode.InnerText } else { 0 }
+			$dlNode = $propsNode.SelectSingleNode("md:DescriptionLength", $ns)
+			$meta.DescriptionLength = if ($dlNode) { [int]$dlNode.InnerText } else { 0 }
+			$meta.Hierarchical = $true
+			$htNode = $propsNode.SelectSingleNode("md:HierarchyType", $ns)
+			$meta.HierarchyType = if ($htNode) { $htNode.InnerText } else { "HierarchyFoldersAndItems" }
+			$meta.Owners = @()
+			$maxEdNode = $propsNode.SelectSingleNode("md:MaxExtDimensionCount", $ns)
+			$meta.MaxExtDimensionCount = if ($maxEdNode) { [int]$maxEdNode.InnerText } else { 0 }
+			$meta.AccountingFlags = @(& $extractFields $childObjs "AccountingFlag")
+			$meta.ExtDimensionAccountingFlags = @(& $extractFields $childObjs "ExtDimensionAccountingFlag")
 		}
 	}
 
@@ -189,6 +242,41 @@ function Load-Preset([string]$PresetName, [string]$ScriptDir) {
 			basedOn = "catalog.list"; choiceMode = $true
 			properties = @{ windowOpeningMode = "LockOwnerWindow" }
 		}
+		# ─── Register defaults ───
+		"informationRegister.record" = @{
+			fieldDefaults = @{ ref = @{ choiceButton = $true }; boolean = @{ element = "check" } }
+			properties = @{ windowOpeningMode = "LockOwnerWindow" }
+		}
+		"informationRegister.list" = @{
+			columns = "all"; columnType = "labelField"
+			tableCommandBar = "none"; commandBar = "auto"
+			properties = @{}
+		}
+		"accumulationRegister.list" = @{
+			columns = "all"; columnType = "labelField"
+			tableCommandBar = "none"; commandBar = "auto"
+			properties = @{}
+		}
+		# ─── Catalog-like type defaults ───
+		"chartOfCharacteristicTypes.item"   = @{ basedOn = "catalog.item" }
+		"chartOfCharacteristicTypes.folder" = @{ basedOn = "catalog.folder" }
+		"chartOfCharacteristicTypes.list"   = @{ basedOn = "catalog.list" }
+		"chartOfCharacteristicTypes.choice" = @{ basedOn = "catalog.choice" }
+		"exchangePlan.item"   = @{ basedOn = "catalog.item" }
+		"exchangePlan.list"   = @{ basedOn = "catalog.list" }
+		"exchangePlan.choice" = @{ basedOn = "catalog.choice" }
+		# ─── ChartOfAccounts defaults ───
+		"chartOfAccounts.item" = @{
+			parent = @{ title = "Подчинен счету" }
+			fieldDefaults = @{ ref = @{ choiceButton = $true }; boolean = @{ element = "check" } }
+			properties = @{}
+		}
+		"chartOfAccounts.folder" = @{
+			parent = @{ title = "Подчинен счету" }
+			properties = @{ windowOpeningMode = "LockOwnerWindow" }
+		}
+		"chartOfAccounts.list"   = @{ basedOn = "catalog.list" }
+		"chartOfAccounts.choice" = @{ basedOn = "catalog.choice" }
 	}
 
 	# Deep merge helper
@@ -826,6 +914,413 @@ function Generate-DocumentItemDSL($meta, [hashtable]$p, [hashtable]$fd) {
 	}
 }
 
+# ─── InformationRegister ──────────────────────────────────────────────────
+
+function Generate-InformationRegisterDSL {
+	param($meta, [hashtable]$presetData, [string]$purpose)
+	$pKey = "informationRegister.$($purpose.ToLower())"
+	$p = if ($presetData.ContainsKey($pKey)) { $presetData[$pKey] } else { @{} }
+	$fd = if ($p.fieldDefaults) { $p.fieldDefaults } else { @{ ref = @{ choiceButton = $true }; boolean = @{ element = "check" } } }
+	switch ($purpose) {
+		"Record" { return Generate-InformationRegisterRecordDSL $meta $p $fd }
+		"List"   { return Generate-InformationRegisterListDSL $meta $p }
+	}
+}
+
+function Generate-InformationRegisterRecordDSL($meta, [hashtable]$p, [hashtable]$fd) {
+	$elements = [ordered]@{}
+	$isPeriodic = $meta.Periodicity -and $meta.Periodicity -ne "Nonperiodical"
+
+	# Period first (if periodic)
+	if ($isPeriodic) {
+		$elements["Период"] = @{ element = "input"; path = "Запись.Period" }
+	}
+	# Dimensions
+	foreach ($dim in $meta.Dimensions) {
+		if (-not (Test-DisplayableType $dim.Type)) { continue }
+		$elements[$dim.Name] = New-FieldElement $dim "Запись" $fd
+	}
+	# Resources
+	foreach ($res in $meta.Resources) {
+		if (-not (Test-DisplayableType $res.Type)) { continue }
+		$elements[$res.Name] = New-FieldElement $res "Запись" $fd
+	}
+	# Attributes
+	foreach ($attr in $meta.Attributes) {
+		if (-not (Test-DisplayableType $attr.Type)) { continue }
+		$elements[$attr.Name] = New-FieldElement $attr "Запись" $fd
+	}
+
+	$props = [ordered]@{ windowOpeningMode = "LockOwnerWindow" }
+	if ($p.properties) { foreach ($k in $p.properties.Keys) { $props[$k] = $p.properties[$k] } }
+
+	return [ordered]@{
+		title = $meta.Synonym
+		properties = $props
+		elements = $elements
+		attributes = @(
+			@{ name = "Запись"; type = "InformationRegisterRecordManager.$($meta.Name)"; main = $true; savedData = $true }
+		)
+	}
+}
+
+function Generate-InformationRegisterListDSL($meta, [hashtable]$p) {
+	$isPeriodic = $meta.Periodicity -and $meta.Periodicity -ne "Nonperiodical"
+	$isRecorderSubordinate = $meta.WriteMode -eq "RecorderSubordinate"
+
+	$columns = [ordered]@{}
+	# Period
+	if ($isPeriodic) {
+		$columns["Период"] = @{ element = "labelField"; path = "Список.Period" }
+	}
+	# Recorder/LineNumber for subordinate registers
+	if ($isRecorderSubordinate) {
+		$columns["Регистратор"] = @{ element = "labelField"; path = "Список.Recorder" }
+		$columns["НомерСтроки"] = @{ element = "labelField"; path = "Список.LineNumber" }
+	}
+	# Dimensions
+	foreach ($dim in $meta.Dimensions) {
+		if (-not (Test-DisplayableType $dim.Type)) { continue }
+		$columns[$dim.Name] = @{ element = "labelField"; path = "Список.$($dim.Name)" }
+	}
+	# Resources
+	foreach ($res in $meta.Resources) {
+		if (-not (Test-DisplayableType $res.Type)) { continue }
+		$el = "labelField"
+		if ($res.Type -match '^xs:boolean$|^Boolean$') { $el = "checkBox" }
+		$columns[$res.Name] = @{ element = $el; path = "Список.$($res.Name)" }
+	}
+	# Attributes
+	foreach ($attr in $meta.Attributes) {
+		if (-not (Test-DisplayableType $attr.Type)) { continue }
+		$el = "labelField"
+		if ($attr.Type -match '^xs:boolean$|^Boolean$') { $el = "checkBox" }
+		$columns[$attr.Name] = @{ element = $el; path = "Список.$($attr.Name)" }
+	}
+
+	$tableEl = [ordered]@{
+		element = "table"
+		path = "Список"
+		commandBarLocation = "none"
+		autoCommandBar = @{ autofill = $false }
+		columns = $columns
+	}
+
+	$props = [ordered]@{}
+	if ($p.properties) { foreach ($k in $p.properties.Keys) { $props[$k] = $p.properties[$k] } }
+
+	return [ordered]@{
+		title = $meta.Synonym
+		properties = $props
+		elements = [ordered]@{
+			"Список" = $tableEl
+		}
+		attributes = @(
+			@{ name = "Список"; type = "DynamicList"; main = $true; settings = @{ mainTable = "InformationRegister.$($meta.Name)"; dynamicDataRead = $true } }
+		)
+	}
+}
+
+# ─── AccumulationRegister ─────────────────────────────────────────────────
+
+function Generate-AccumulationRegisterDSL {
+	param($meta, [hashtable]$presetData, [string]$purpose)
+	$pKey = "accumulationRegister.$($purpose.ToLower())"
+	$p = if ($presetData.ContainsKey($pKey)) { $presetData[$pKey] } else { @{} }
+	switch ($purpose) {
+		"List" { return Generate-AccumulationRegisterListDSL $meta $p }
+	}
+}
+
+function Generate-AccumulationRegisterListDSL($meta, [hashtable]$p) {
+	$columns = [ordered]@{}
+	# AccumulationRegisters always have Period, Recorder, LineNumber
+	$columns["Период"] = @{ element = "labelField"; path = "Список.Period" }
+	$columns["Регистратор"] = @{ element = "labelField"; path = "Список.Recorder" }
+	$columns["НомерСтроки"] = @{ element = "labelField"; path = "Список.LineNumber" }
+	# Dimensions
+	foreach ($dim in $meta.Dimensions) {
+		if (-not (Test-DisplayableType $dim.Type)) { continue }
+		$columns[$dim.Name] = @{ element = "labelField"; path = "Список.$($dim.Name)" }
+	}
+	# Resources
+	foreach ($res in $meta.Resources) {
+		if (-not (Test-DisplayableType $res.Type)) { continue }
+		$el = "labelField"
+		if ($res.Type -match '^xs:boolean$|^Boolean$') { $el = "checkBox" }
+		$columns[$res.Name] = @{ element = $el; path = "Список.$($res.Name)" }
+	}
+	# Attributes
+	foreach ($attr in $meta.Attributes) {
+		if (-not (Test-DisplayableType $attr.Type)) { continue }
+		$el = "labelField"
+		if ($attr.Type -match '^xs:boolean$|^Boolean$') { $el = "checkBox" }
+		$columns[$attr.Name] = @{ element = $el; path = "Список.$($attr.Name)" }
+	}
+
+	$tableEl = [ordered]@{
+		element = "table"
+		path = "Список"
+		commandBarLocation = "none"
+		autoCommandBar = @{ autofill = $false }
+		columns = $columns
+	}
+
+	$props = [ordered]@{}
+	if ($p.properties) { foreach ($k in $p.properties.Keys) { $props[$k] = $p.properties[$k] } }
+
+	return [ordered]@{
+		title = $meta.Synonym
+		properties = $props
+		elements = [ordered]@{
+			"Список" = $tableEl
+		}
+		attributes = @(
+			@{ name = "Список"; type = "DynamicList"; main = $true; settings = @{ mainTable = "AccumulationRegister.$($meta.Name)"; dynamicDataRead = $true } }
+		)
+	}
+}
+
+# ─── ChartOfCharacteristicTypes (delegates to Catalog) ────────────────────
+
+function Generate-ChartOfCharacteristicTypesDSL {
+	param($meta, [hashtable]$presetData, [string]$purpose)
+	# Delegate to Catalog generators — meta already has CodeLength, DescriptionLength, etc.
+	$dsl = Generate-CatalogDSL -meta $meta -presetData $presetData -purpose $purpose
+
+	# Post-patch: replace Catalog types with ChartOfCharacteristicTypes types
+	$catObjType = "CatalogObject.$($meta.Name)"
+	$ccoctObjType = "ChartOfCharacteristicTypesObject.$($meta.Name)"
+	$catListType = "Catalog.$($meta.Name)"
+	$ccoctListType = "ChartOfCharacteristicTypes.$($meta.Name)"
+
+	foreach ($a in $dsl.attributes) {
+		if ($a.type -eq $catObjType) { $a.type = $ccoctObjType }
+		if ($a.type -eq "DynamicList" -and $a.settings -and $a.settings.mainTable -eq $catListType) {
+			$a.settings.mainTable = $ccoctListType
+		}
+	}
+
+	# For Item forms: inject ValueType field after Code/Description
+	if ($purpose -eq "Item" -and $dsl.elements) {
+		$newElements = [ordered]@{}
+		$inserted = $false
+		foreach ($k in $dsl.elements.Keys) {
+			$newElements[$k] = $dsl.elements[$k]
+			# Insert after Description or after ГруппаКодНаименование
+			if (-not $inserted -and ($k -eq "Наименование" -or $k -eq "ГруппаКодНаименование")) {
+				$newElements["ТипЗначения"] = @{ element = "input"; path = "Объект.ValueType" }
+				$inserted = $true
+			}
+		}
+		if (-not $inserted) {
+			$newElements["ТипЗначения"] = @{ element = "input"; path = "Объект.ValueType" }
+		}
+		$dsl.elements = $newElements
+	}
+
+	return $dsl
+}
+
+# ─── ExchangePlan (delegates to Catalog) ──────────────────────────────────
+
+function Generate-ExchangePlanDSL {
+	param($meta, [hashtable]$presetData, [string]$purpose)
+	# ExchangePlans are not hierarchical and have no Folder form
+	$dsl = Generate-CatalogDSL -meta $meta -presetData $presetData -purpose $purpose
+
+	# Post-patch: replace Catalog types with ExchangePlan types
+	$catObjType = "CatalogObject.$($meta.Name)"
+	$epObjType = "ExchangePlanObject.$($meta.Name)"
+	$catListType = "Catalog.$($meta.Name)"
+	$epListType = "ExchangePlan.$($meta.Name)"
+
+	foreach ($a in $dsl.attributes) {
+		if ($a.type -eq $catObjType) { $a.type = $epObjType }
+		if ($a.type -eq "DynamicList" -and $a.settings -and $a.settings.mainTable -eq $catListType) {
+			$a.settings.mainTable = $epListType
+		}
+	}
+
+	# For Item forms: inject SentNo, ReceivedNo after Code/Description
+	if ($purpose -eq "Item" -and $dsl.elements) {
+		$newElements = [ordered]@{}
+		$inserted = $false
+		foreach ($k in $dsl.elements.Keys) {
+			$newElements[$k] = $dsl.elements[$k]
+			if (-not $inserted -and ($k -eq "Наименование" -or $k -eq "ГруппаКодНаименование")) {
+				$newElements["НомерОтправленного"] = @{ element = "input"; path = "Объект.SentNo"; readOnly = $true }
+				$newElements["НомерПринятого"]      = @{ element = "input"; path = "Объект.ReceivedNo"; readOnly = $true }
+				$inserted = $true
+			}
+		}
+		if (-not $inserted) {
+			$newElements["НомерОтправленного"] = @{ element = "input"; path = "Объект.SentNo"; readOnly = $true }
+			$newElements["НомерПринятого"]      = @{ element = "input"; path = "Объект.ReceivedNo"; readOnly = $true }
+		}
+		$dsl.elements = $newElements
+	}
+
+	return $dsl
+}
+
+# ─── ChartOfAccounts ──────────────────────────────────────────────────────
+
+function Generate-ChartOfAccountsDSL {
+	param($meta, [hashtable]$presetData, [string]$purpose)
+	$pKey = "chartOfAccounts.$($purpose.ToLower())"
+	$p = if ($presetData.ContainsKey($pKey)) { $presetData[$pKey] } else { @{} }
+	$fd = if ($p.fieldDefaults) { $p.fieldDefaults } else { @{ ref = @{ choiceButton = $true }; boolean = @{ element = "check" } } }
+	switch ($purpose) {
+		"Item"   { return Generate-ChartOfAccountsItemDSL $meta $p $fd $presetData }
+		"Folder" { return Generate-ChartOfAccountsFolderDSL $meta $p }
+		"List"   { return Generate-ChartOfAccountsListDSL $meta $presetData }
+		"Choice" { return Generate-ChartOfAccountsChoiceDSL $meta $presetData }
+	}
+}
+
+function Generate-ChartOfAccountsItemDSL($meta, [hashtable]$p, [hashtable]$fd, [hashtable]$presetData) {
+	$elements = [ordered]@{}
+
+	# Header: Code + Parent
+	$headerLeft = [ordered]@{}
+	if ($meta.CodeLength -gt 0) {
+		$headerLeft["Код"] = @{ element = "input"; path = "Объект.Code" }
+	}
+	$headerRight = [ordered]@{}
+	if ($meta.Hierarchical) {
+		$parentTitle = if ($p.parent -and $p.parent.title) { $p.parent.title } else { "Подчинен счету" }
+		$headerRight["Родитель"] = @{ element = "input"; path = "Объект.Parent"; title = $parentTitle }
+	}
+
+	if ($headerRight.Count -gt 0) {
+		$elements["ГруппаШапка"] = [ordered]@{
+			element = "group"; groupType = "horizontal"; showTitle = $false; representation = "none"
+			elements = [ordered]@{
+				"ГруппаШапкаЛево"  = [ordered]@{ element = "group"; groupType = "vertical"; showTitle = $false; elements = $headerLeft }
+				"ГруппаШапкаПраво" = [ordered]@{ element = "group"; groupType = "vertical"; showTitle = $false; elements = $headerRight }
+			}
+		}
+	} elseif ($headerLeft.Count -gt 0) {
+		foreach ($k in $headerLeft.Keys) { $elements[$k] = $headerLeft[$k] }
+	}
+
+	# Description
+	if ($meta.DescriptionLength -gt 0) {
+		$elements["Наименование"] = @{ element = "input"; path = "Объект.Description" }
+	}
+
+	# OffBalance
+	$elements["Забалансовый"] = @{ element = "check"; path = "Объект.OffBalance" }
+
+	# AccountingFlags as checkboxes
+	if ($meta.AccountingFlags -and $meta.AccountingFlags.Count -gt 0) {
+		$flagElements = [ordered]@{}
+		foreach ($flag in $meta.AccountingFlags) {
+			$flagElements[$flag.Name] = @{ element = "check"; path = "Объект.$($flag.Name)" }
+		}
+		$elements["ГруппаПризнакиУчета"] = [ordered]@{
+			element = "group"; groupType = "vertical"; title = "Признаки учета"
+			elements = $flagElements
+		}
+	}
+
+	# ExtDimensionTypes table
+	if ($meta.MaxExtDimensionCount -gt 0) {
+		$edCols = [ordered]@{}
+		$edCols["ВидСубконто"] = @{ element = "input"; path = "Объект.ExtDimensionTypes.ExtDimensionType" }
+		$edCols["ТолькоОбороты"] = @{ element = "check"; path = "Объект.ExtDimensionTypes.TurnoversOnly" }
+		if ($meta.ExtDimensionAccountingFlags) {
+			foreach ($edFlag in $meta.ExtDimensionAccountingFlags) {
+				$edCols[$edFlag.Name] = @{ element = "check"; path = "Объект.ExtDimensionTypes.$($edFlag.Name)" }
+			}
+		}
+		$elements["ВидыСубконто"] = [ordered]@{
+			element = "table"
+			path = "Объект.ExtDimensionTypes"
+			columns = $edCols
+		}
+	}
+
+	# Custom attributes
+	foreach ($attr in $meta.Attributes) {
+		if (-not (Test-DisplayableType $attr.Type)) { continue }
+		$elements[$attr.Name] = New-FieldElement $attr "Объект" $fd
+	}
+
+	# Tabular sections
+	$tsExclude = @("ДополнительныеРеквизиты","Представления")
+	foreach ($ts in $meta.TabularSections) {
+		if ($tsExclude -contains $ts.Name) { continue }
+		$tsCols = [ordered]@{}
+		foreach ($col in $ts.Columns) {
+			if (-not (Test-DisplayableType $col.Type)) { continue }
+			$tsCols["$($ts.Name)$($col.Name)"] = New-FieldElement $col "Объект.$($ts.Name)" $fd
+		}
+		$elements[$ts.Name] = [ordered]@{ element = "table"; path = "Объект.$($ts.Name)"; columns = $tsCols }
+	}
+
+	$props = [ordered]@{}
+	if ($p.properties) { foreach ($k in $p.properties.Keys) { $props[$k] = $p.properties[$k] } }
+
+	return [ordered]@{
+		title = $meta.Synonym
+		properties = $props
+		elements = $elements
+		attributes = @(
+			@{ name = "Объект"; type = "ChartOfAccountsObject.$($meta.Name)"; main = $true; savedData = $true }
+		)
+	}
+}
+
+function Generate-ChartOfAccountsFolderDSL($meta, [hashtable]$p) {
+	$elements = [ordered]@{}
+	if ($meta.CodeLength -gt 0) {
+		$elements["Код"] = @{ element = "input"; path = "Объект.Code" }
+	}
+	if ($meta.DescriptionLength -gt 0) {
+		$elements["Наименование"] = @{ element = "input"; path = "Объект.Description" }
+	}
+	if ($meta.Hierarchical) {
+		$parentTitle = if ($p.parent -and $p.parent.title) { $p.parent.title } else { "Подчинен счету" }
+		$elements["Родитель"] = @{ element = "input"; path = "Объект.Parent"; title = $parentTitle }
+	}
+
+	$props = [ordered]@{ windowOpeningMode = "LockOwnerWindow" }
+	if ($p.properties) { foreach ($k in $p.properties.Keys) { $props[$k] = $p.properties[$k] } }
+
+	return [ordered]@{
+		title = $meta.Synonym
+		useForFoldersAndItems = "Folders"
+		properties = $props
+		elements = $elements
+		attributes = @(
+			@{ name = "Объект"; type = "ChartOfAccountsObject.$($meta.Name)"; main = $true; savedData = $true }
+		)
+	}
+}
+
+function Generate-ChartOfAccountsListDSL($meta, [hashtable]$presetData) {
+	# Delegate to Catalog List and patch types
+	$dsl = Generate-CatalogDSL -meta $meta -presetData $presetData -purpose "List"
+	foreach ($a in $dsl.attributes) {
+		if ($a.type -eq "DynamicList" -and $a.settings -and $a.settings.mainTable -eq "Catalog.$($meta.Name)") {
+			$a.settings.mainTable = "ChartOfAccounts.$($meta.Name)"
+		}
+	}
+	return $dsl
+}
+
+function Generate-ChartOfAccountsChoiceDSL($meta, [hashtable]$presetData) {
+	$dsl = Generate-CatalogDSL -meta $meta -presetData $presetData -purpose "Choice"
+	foreach ($a in $dsl.attributes) {
+		if ($a.type -eq "DynamicList" -and $a.settings -and $a.settings.mainTable -eq "Catalog.$($meta.Name)") {
+			$a.settings.mainTable = "ChartOfAccounts.$($meta.Name)"
+		}
+	}
+	return $dsl
+}
+
 # ═══════════════════════════════════════════════════════════════════════════
 # END OF FROM-OBJECT MODE FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════
@@ -859,6 +1354,9 @@ $script:formNameToPurpose = @{
 	"ФормаСписка"     = "List"
 	"ФормаВыбора"     = "Choice"
 	"ФормаГруппы"     = "Folder"
+	"ФормаЗаписи"     = "Record"
+	"ФормаСчета"      = "Item"
+	"ФормаУзла"       = "Item"
 }
 
 if ($FromObject -and $JsonPath) {
@@ -942,12 +1440,17 @@ if ($FromObject) {
 	$presetData = Load-Preset -PresetName $Preset -ScriptDir $PSScriptRoot
 
 	$supportedPurposes = switch ($meta.Type) {
-		"Document" { @("Item","List","Choice") }
-		"Catalog"  { @("Item","Folder","List","Choice") }
-		default    { @() }
+		"Document"                    { @("Item","List","Choice") }
+		"Catalog"                     { @("Item","Folder","List","Choice") }
+		"InformationRegister"         { @("Record","List") }
+		"AccumulationRegister"        { @("List") }
+		"ChartOfCharacteristicTypes"  { @("Item","Folder","List","Choice") }
+		"ExchangePlan"                { @("Item","List","Choice") }
+		"ChartOfAccounts"             { @("Item","Folder","List","Choice") }
+		default                       { @() }
 	}
 	if ($supportedPurposes.Count -eq 0) {
-		Write-Error "Object type '$($meta.Type)' is not yet supported by --from-object. Supported: Document, Catalog."
+		Write-Error "Object type '$($meta.Type)' is not yet supported by --from-object. Supported: Document, Catalog, InformationRegister, AccumulationRegister, ChartOfCharacteristicTypes, ExchangePlan, ChartOfAccounts."
 		exit 1
 	}
 	if ($supportedPurposes -notcontains $effectivePurpose) {
@@ -957,8 +1460,13 @@ if ($FromObject) {
 
 	# Generate DSL
 	$dsl = switch ($meta.Type) {
-		"Document" { Generate-DocumentDSL -meta $meta -presetData $presetData -purpose $effectivePurpose }
-		"Catalog"  { Generate-CatalogDSL -meta $meta -presetData $presetData -purpose $effectivePurpose }
+		"Document"                    { Generate-DocumentDSL -meta $meta -presetData $presetData -purpose $effectivePurpose }
+		"Catalog"                     { Generate-CatalogDSL -meta $meta -presetData $presetData -purpose $effectivePurpose }
+		"InformationRegister"         { Generate-InformationRegisterDSL -meta $meta -presetData $presetData -purpose $effectivePurpose }
+		"AccumulationRegister"        { Generate-AccumulationRegisterDSL -meta $meta -presetData $presetData -purpose $effectivePurpose }
+		"ChartOfCharacteristicTypes"  { Generate-ChartOfCharacteristicTypesDSL -meta $meta -presetData $presetData -purpose $effectivePurpose }
+		"ExchangePlan"                { Generate-ExchangePlanDSL -meta $meta -presetData $presetData -purpose $effectivePurpose }
+		"ChartOfAccounts"             { Generate-ChartOfAccountsDSL -meta $meta -presetData $presetData -purpose $effectivePurpose }
 	}
 
 	# Emit DSL if requested

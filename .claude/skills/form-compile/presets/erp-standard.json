@@ -40,5 +40,29 @@
     "tabularSections": {
       "exclude": ["ДополнительныеРеквизиты", "Представления"]
     }
+  },
+
+  "informationRegister.record": {
+    "properties": {
+      "windowOpeningMode": "LockOwnerWindow"
+    }
+  },
+
+  "informationRegister.list": {},
+
+  "accumulationRegister.list": {},
+
+  "chartOfCharacteristicTypes.item": {
+    "basedOn": "catalog.item"
+  },
+
+  "exchangePlan.item": {
+    "basedOn": "catalog.item"
+  },
+
+  "chartOfAccounts.item": {
+    "parent": {
+      "title": "Подчинен счету"
+    }
   }
 }
