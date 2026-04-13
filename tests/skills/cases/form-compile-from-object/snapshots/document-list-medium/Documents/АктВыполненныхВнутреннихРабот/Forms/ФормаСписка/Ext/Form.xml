@@ -22,72 +22,84 @@
 			<ViewStatusAddition name="СписокСостояниеПросмотра" id="5"/>
 			<SearchControlAddition name="СписокУправлениеПоиском" id="6"/>
 			<ChildItems>
-				<LabelField name="Организация" id="7">
+				<LabelField name="Номер" id="7">
+					<DataPath>Список.Number</DataPath>
+					<ContextMenu name="НомерКонтекстноеМеню" id="8"/>
+					<ExtendedTooltip name="НомерРасширеннаяПодсказка" id="9"/>
+				</LabelField>
+				<LabelField name="Дата" id="10">
+					<DataPath>Список.Date</DataPath>
+					<ContextMenu name="ДатаКонтекстноеМеню" id="11"/>
+					<ExtendedTooltip name="ДатаРасширеннаяПодсказка" id="12"/>
+				</LabelField>
+				<LabelField name="Организация" id="13">
 					<DataPath>Список.Организация</DataPath>
-					<ContextMenu name="ОрганизацияКонтекстноеМеню" id="8"/>
-					<ExtendedTooltip name="ОрганизацияРасширеннаяПодсказка" id="9"/>
+					<ContextMenu name="ОрганизацияКонтекстноеМеню" id="14"/>
+					<ExtendedTooltip name="ОрганизацияРасширеннаяПодсказка" id="15"/>
 				</LabelField>
-				<LabelField name="ОрганизацияПолучатель" id="10">
+				<LabelField name="ОрганизацияПолучатель" id="16">
 					<DataPath>Список.ОрганизацияПолучатель</DataPath>
-					<ContextMenu name="ОрганизацияПолучательКонтекстноеМеню" id="11"/>
-					<ExtendedTooltip name="ОрганизацияПолучательРасширеннаяПодсказка" id="12"/>
+					<ContextMenu name="ОрганизацияПолучательКонтекстноеМеню" id="17"/>
+					<ExtendedTooltip name="ОрганизацияПолучательРасширеннаяПодсказка" id="18"/>
 				</LabelField>
-				<LabelField name="Подразделение" id="13">
+				<LabelField name="Подразделение" id="19">
 					<DataPath>Список.Подразделение</DataPath>
-					<ContextMenu name="ПодразделениеКонтекстноеМеню" id="14"/>
-					<ExtendedTooltip name="ПодразделениеРасширеннаяПодсказка" id="15"/>
+					<ContextMenu name="ПодразделениеКонтекстноеМеню" id="20"/>
+					<ExtendedTooltip name="ПодразделениеРасширеннаяПодсказка" id="21"/>
 				</LabelField>
-				<LabelField name="ХозяйственнаяОперация" id="16">
+				<LabelField name="ХозяйственнаяОперация" id="22">
 					<DataPath>Список.ХозяйственнаяОперация</DataPath>
-					<ContextMenu name="ХозяйственнаяОперацияКонтекстноеМеню" id="17"/>
-					<ExtendedTooltip name="ХозяйственнаяОперацияРасширеннаяПодсказка" id="18"/>
+					<ContextMenu name="ХозяйственнаяОперацияКонтекстноеМеню" id="23"/>
+					<ExtendedTooltip name="ХозяйственнаяОперацияРасширеннаяПодсказка" id="24"/>
 				</LabelField>
-				<LabelField name="ПеремещениеПодДеятельность" id="19">
+				<LabelField name="ПеремещениеПодДеятельность" id="25">
 					<DataPath>Список.ПеремещениеПодДеятельность</DataPath>
-					<ContextMenu name="ПеремещениеПодДеятельностьКонтекстноеМеню" id="20"/>
-					<ExtendedTooltip name="ПеремещениеПодДеятельностьРасширеннаяПодсказка" id="21"/>
+					<ContextMenu name="ПеремещениеПодДеятельностьКонтекстноеМеню" id="26"/>
+					<ExtendedTooltip name="ПеремещениеПодДеятельностьРасширеннаяПодсказка" id="27"/>
 				</LabelField>
-				<LabelField name="НаправлениеДеятельности" id="22">
+				<LabelField name="НаправлениеДеятельности" id="28">
 					<DataPath>Список.НаправлениеДеятельности</DataPath>
-					<ContextMenu name="НаправлениеДеятельностиКонтекстноеМеню" id="23"/>
-					<ExtendedTooltip name="НаправлениеДеятельностиРасширеннаяПодсказка" id="24"/>
+					<ContextMenu name="НаправлениеДеятельностиКонтекстноеМеню" id="29"/>
+					<ExtendedTooltip name="НаправлениеДеятельностиРасширеннаяПодсказка" id="30"/>
 				</LabelField>
-				<LabelField name="Ответственный" id="25">
+				<LabelField name="Ответственный" id="31">
 					<DataPath>Список.Ответственный</DataPath>
-					<ContextMenu name="ОтветственныйКонтекстноеМеню" id="26"/>
-					<ExtendedTooltip name="ОтветственныйРасширеннаяПодсказка" id="27"/>
+					<ContextMenu name="ОтветственныйКонтекстноеМеню" id="32"/>
+					<ExtendedTooltip name="ОтветственныйРасширеннаяПодсказка" id="33"/>
 				</LabelField>
-				<LabelField name="СторнируемыйДокумент" id="28">
+				<LabelField name="СторнируемыйДокумент" id="34">
 					<DataPath>Список.СторнируемыйДокумент</DataPath>
-					<ContextMenu name="СторнируемыйДокументКонтекстноеМеню" id="29"/>
-					<ExtendedTooltip name="СторнируемыйДокументРасширеннаяПодсказка" id="30"/>
+					<ContextMenu name="СторнируемыйДокументКонтекстноеМеню" id="35"/>
+					<ExtendedTooltip name="СторнируемыйДокументРасширеннаяПодсказка" id="36"/>
 				</LabelField>
-				<LabelField name="ИсправляемыйДокумент" id="31">
+				<LabelField name="ИсправляемыйДокумент" id="37">
 					<DataPath>Список.ИсправляемыйДокумент</DataPath>
-					<ContextMenu name="ИсправляемыйДокументКонтекстноеМеню" id="32"/>
-					<ExtendedTooltip name="ИсправляемыйДокументРасширеннаяПодсказка" id="33"/>
+					<ContextMenu name="ИсправляемыйДокументКонтекстноеМеню" id="38"/>
+					<ExtendedTooltip name="ИсправляемыйДокументРасширеннаяПодсказка" id="39"/>
 				</LabelField>
-				<LabelField name="Комментарий" id="34">
+				<LabelField name="Комментарий" id="40">
 					<DataPath>Список.Комментарий</DataPath>
-					<ContextMenu name="КомментарийКонтекстноеМеню" id="35"/>
-					<ExtendedTooltip name="КомментарийРасширеннаяПодсказка" id="36"/>
+					<ContextMenu name="КомментарийКонтекстноеМеню" id="41"/>
+					<ExtendedTooltip name="КомментарийРасширеннаяПодсказка" id="42"/>
 				</LabelField>
-				<LabelField name="Исправление" id="37">
+				<LabelField name="Исправление" id="43">
 					<DataPath>Список.Исправление</DataPath>
-					<ContextMenu name="ИсправлениеКонтекстноеМеню" id="38"/>
-					<ExtendedTooltip name="ИсправлениеРасширеннаяПодсказка" id="39"/>
+					<ContextMenu name="ИсправлениеКонтекстноеМеню" id="44"/>
+					<ExtendedTooltip name="ИсправлениеРасширеннаяПодсказка" id="45"/>
 				</LabelField>
-				<LabelField name="Ссылка" id="40">
+				<LabelField name="Ссылка" id="46">
 					<DataPath>Список.Ref</DataPath>
-					<Visible>false</Visible>
-					<ContextMenu name="СсылкаКонтекстноеМеню" id="41"/>
-					<ExtendedTooltip name="СсылкаРасширеннаяПодсказка" id="42"/>
+					<UserVisible>
+						<xr:Common>false</xr:Common>
+					</UserVisible>
+					<ContextMenu name="СсылкаКонтекстноеМеню" id="47"/>
+					<ExtendedTooltip name="СсылкаРасширеннаяПодсказка" id="48"/>
 				</LabelField>
 			</ChildItems>
 		</Table>
 	</ChildItems>
 	<Attributes>
-		<Attribute name="Список" id="43">
+		<Attribute name="Список" id="49">
 			<Type>
 				<v8:Type>cfg:DynamicList</v8:Type>
 			</Type>

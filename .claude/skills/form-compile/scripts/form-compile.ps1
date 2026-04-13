@@ -455,7 +455,7 @@ function Generate-CatalogListDSL($meta, [hashtable]$p) {
 	}
 	# Hidden ref
 	if (-not $p.ContainsKey("hiddenRef") -or $p.hiddenRef -eq $true) {
-		$columns += [ordered]@{ labelField = "Ссылка"; path = "Список.Ref"; visible = $false }
+		$columns += [ordered]@{ labelField = "Ссылка"; path = "Список.Ref"; userVisible = $false }
 	}
 
 	$tableEl = [ordered]@{
@@ -653,6 +653,9 @@ function Generate-DocumentDSL {
 
 function Generate-DocumentListDSL($meta, [hashtable]$p) {
 	$columns = @()
+	# Standard columns: Number + Date
+	$columns += [ordered]@{ labelField = "Номер"; path = "Список.Number" }
+	$columns += [ordered]@{ labelField = "Дата"; path = "Список.Date" }
 	# All custom attributes as labelField
 	foreach ($attr in $meta.Attributes) {
 		if (-not (Test-DisplayableType $attr.Type)) { continue }
@@ -660,7 +663,7 @@ function Generate-DocumentListDSL($meta, [hashtable]$p) {
 	}
 	# Hidden ref
 	if (-not $p.ContainsKey("hiddenRef") -or $p.hiddenRef -eq $true) {
-		$columns += [ordered]@{ labelField = "Ссылка"; path = "Список.Ref"; visible = $false }
+		$columns += [ordered]@{ labelField = "Ссылка"; path = "Список.Ref"; userVisible = $false }
 	}
 
 	$tableEl = [ordered]@{
@@ -938,17 +941,17 @@ function Generate-InformationRegisterRecordDSL($meta, [hashtable]$p, [hashtable]
 	# Dimensions
 	foreach ($dim in $meta.Dimensions) {
 		if (-not (Test-DisplayableType $dim.Type)) { continue }
-		$elements[$dim.Name] = New-FieldElement $dim "Запись" $fd
+		$elements[$dim.Name] = New-FieldElement -attrName $dim.Name -dataPath "Запись.$($dim.Name)" -attrType $dim.Type -fieldDefaults $fd
 	}
 	# Resources
 	foreach ($res in $meta.Resources) {
 		if (-not (Test-DisplayableType $res.Type)) { continue }
-		$elements[$res.Name] = New-FieldElement $res "Запись" $fd
+		$elements[$res.Name] = New-FieldElement -attrName $res.Name -dataPath "Запись.$($res.Name)" -attrType $res.Type -fieldDefaults $fd
 	}
 	# Attributes
 	foreach ($attr in $meta.Attributes) {
 		if (-not (Test-DisplayableType $attr.Type)) { continue }
-		$elements[$attr.Name] = New-FieldElement $attr "Запись" $fd
+		$elements[$attr.Name] = New-FieldElement -attrName $attr.Name -dataPath "Запись.$($attr.Name)" -attrType $attr.Type -fieldDefaults $fd
 	}
 
 	$props = [ordered]@{ windowOpeningMode = "LockOwnerWindow" }
@@ -1245,7 +1248,7 @@ function Generate-ChartOfAccountsItemDSL($meta, [hashtable]$p, [hashtable]$fd, [
 	# Custom attributes
 	foreach ($attr in $meta.Attributes) {
 		if (-not (Test-DisplayableType $attr.Type)) { continue }
-		$elements[$attr.Name] = New-FieldElement $attr "Объект" $fd
+		$elements[$attr.Name] = New-FieldElement -attrName $attr.Name -dataPath "Объект.$($attr.Name)" -attrType $attr.Type -fieldDefaults $fd
 	}
 
 	# Tabular sections
@@ -1255,7 +1258,7 @@ function Generate-ChartOfAccountsItemDSL($meta, [hashtable]$p, [hashtable]$fd, [
 		$tsCols = [ordered]@{}
 		foreach ($col in $ts.Columns) {
 			if (-not (Test-DisplayableType $col.Type)) { continue }
-			$tsCols["$($ts.Name)$($col.Name)"] = New-FieldElement $col "Объект.$($ts.Name)" $fd
+			$tsCols["$($ts.Name)$($col.Name)"] = New-FieldElement -attrName "$($ts.Name)$($col.Name)" -dataPath "Объект.$($ts.Name).$($col.Name)" -attrType $col.Type -fieldDefaults $fd
 		}
 		$elements[$ts.Name] = [ordered]@{ element = "table"; path = "Объект.$($ts.Name)"; columns = $tsCols }
 	}
@@ -1845,7 +1848,7 @@ function Emit-Element {
 		# naming & binding
 		"name"=1;"path"=1;"title"=1
 		# visibility & state
-		"visible"=1;"hidden"=1;"enabled"=1;"disabled"=1;"readOnly"=1
+		"visible"=1;"hidden"=1;"enabled"=1;"disabled"=1;"readOnly"=1;"userVisible"=1
 		# events
 		"on"=1;"handlers"=1
 		# layout
@@ -1904,6 +1907,11 @@ function Emit-Element {
 function Emit-CommonFlags {
 	param($el, [string]$indent)
 	if ($el.visible -eq $false -or $el.hidden -eq $true) { X "$indent<Visible>false</Visible>" }
+	if ($el.userVisible -eq $false) {
+		X "$indent<UserVisible>"
+		X "$indent`t<xr:Common>false</xr:Common>"
+		X "$indent</UserVisible>"
+	}
 	if ($el.enabled -eq $false -or $el.disabled -eq $true) { X "$indent<Enabled>false</Enabled>" }
 	if ($el.readOnly -eq $true) { X "$indent<ReadOnly>true</ReadOnly>" }
 }

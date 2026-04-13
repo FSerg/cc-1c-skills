@@ -70,7 +70,9 @@
 				</LabelField>
 				<LabelField name="Ссылка" id="34">
 					<DataPath>Список.Ref</DataPath>
-					<Visible>false</Visible>
+					<UserVisible>
+						<xr:Common>false</xr:Common>
+					</UserVisible>
 					<ContextMenu name="СсылкаКонтекстноеМеню" id="35"/>
 					<ExtendedTooltip name="СсылкаРасширеннаяПодсказка" id="36"/>
 				</LabelField>
