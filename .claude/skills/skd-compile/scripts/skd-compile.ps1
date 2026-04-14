@@ -1,4 +1,4 @@
-﻿# skd-compile v1.11 — Compile 1C DCS from JSON
+﻿# skd-compile v1.12 — Compile 1C DCS from JSON
 # Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 param(
 	[string]$DefinitionFile,
@@ -1065,10 +1065,22 @@ $script:areaStylePresets = @{
 	}
 }
 
-# Load user presets from skd-styles.json (same dir as definition or cwd)
+# Load user presets from skd-styles.json
+# Search order (first found wins): 1) definition dir, 2) cwd, 3) scan-up from OutputPath for presets/skills/skd/
 $script:userStylesLoaded = $false
-foreach ($stylesDir in @($script:queryBaseDir, (Get-Location).Path)) {
-	$stylesFile = Join-Path $stylesDir "skd-styles.json"
+$searchPaths = @(
+	(Join-Path $script:queryBaseDir "skd-styles.json"),
+	(Join-Path (Get-Location).Path "skd-styles.json")
+)
+$outResolved = if ([System.IO.Path]::IsPathRooted($OutputPath)) { $OutputPath } else { Join-Path (Get-Location).Path $OutputPath }
+$scanDir = [System.IO.Path]::GetDirectoryName($outResolved)
+while ($scanDir) {
+	$searchPaths += Join-Path (Join-Path (Join-Path (Join-Path $scanDir "presets") "skills") "skd") "skd-styles.json"
+	$parentDir = Split-Path $scanDir -Parent
+	if ($parentDir -eq $scanDir) { break }
+	$scanDir = $parentDir
+}
+foreach ($stylesFile in $searchPaths) {
 	if (Test-Path $stylesFile) {
 		$userStyles = Get-Content -Raw -Encoding UTF8 $stylesFile | ConvertFrom-Json
 		foreach ($prop in $userStyles.PSObject.Properties) {

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# skd-compile v1.11 — Compile 1C DCS from JSON
+# skd-compile v1.12 — Compile 1C DCS from JSON
 # Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 import argparse
 import json
@@ -904,9 +904,21 @@ AREA_STYLE_PRESETS = {
 }
 
 
-def load_user_styles(base_dir):
-    for d in [base_dir, os.getcwd()]:
-        p = os.path.join(d, 'skd-styles.json')
+def load_user_styles(base_dir, output_path=None):
+    # Search order (first found wins): 1) definition dir, 2) cwd, 3) scan-up from OutputPath for presets/skills/skd/
+    search_paths = [
+        os.path.join(base_dir, 'skd-styles.json'),
+        os.path.join(os.getcwd(), 'skd-styles.json'),
+    ]
+    if output_path:
+        scan_dir = os.path.dirname(output_path)
+        while scan_dir:
+            search_paths.append(os.path.join(scan_dir, 'presets', 'skills', 'skd', 'skd-styles.json'))
+            parent_dir = os.path.dirname(scan_dir)
+            if parent_dir == scan_dir:
+                break
+            scan_dir = parent_dir
+    for p in search_paths:
         if os.path.isfile(p):
             with open(p, 'r', encoding='utf-8-sig') as f:
                 user_styles = json.load(f)
@@ -1808,7 +1820,8 @@ def main():
     query_base_dir = os.path.dirname(def_file) if args.DefinitionFile else os.getcwd()
 
     # Load user style presets
-    load_user_styles(query_base_dir)
+    out_path_resolved = args.OutputPath if os.path.isabs(args.OutputPath) else os.path.join(os.getcwd(), args.OutputPath)
+    load_user_styles(query_base_dir, out_path_resolved)
 
     # --- 2. Resolve defaults ---
 

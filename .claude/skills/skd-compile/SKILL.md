@@ -287,7 +287,7 @@ Folder в selection: `{"folder": "Поступление", "items": ["ПолеА
 
 Встроенные стили: `header` (фон, центр, перенос), `data` (фон группы), `subheader` (без фона, центр), `total` (без фона). Все — Arial 10, рамки Solid 1px, цвета через стили платформы.
 
-Пользовательские стили: файл `skd-styles.json` рядом с JSON или в корне проекта. Все допустимые ключи и формат цветов — в `examples/skd-styles.json`.
+Пользовательские стили: файл `skd-styles.json` рядом с JSON-определением, в текущей директории, или в `presets/skills/skd/skd-styles.json` (поиск вверх от OutputPath). Первый найденный файл побеждает. Все допустимые ключи и формат цветов — в `examples/skd-styles.json`.
 
 Raw XML (`"template": "<...>"`) остаётся как fallback. Детект: если есть `rows` — DSL, иначе — raw.
 
