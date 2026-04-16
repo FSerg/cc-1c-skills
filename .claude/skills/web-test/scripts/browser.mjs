@@ -1,4 +1,4 @@
-// web-test browser v1.8 — Playwright browser management for 1C web client
+// web-test browser v1.9 — Playwright browser management for 1C web client
 // Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 /**
  * Playwright browser management for 1C web client.
@@ -972,30 +972,26 @@ export async function readTable({ maxRows = 20, offset = 0, table } = {}) {
  * where frameIndex is the Playwright frames[] index (1-based, 0 = main).
  */
 async function scanSpreadsheetCells(formNum) {
-  const iframeIndices = await page.evaluate(`(() => {
-    const prefix = 'form${formNum ?? 0}_';
-    const allIframes = [...document.querySelectorAll('iframe')];
-    const indices = [];
-    for (let i = 0; i < allIframes.length; i++) {
-      const f = allIframes[i];
-      if (f.offsetWidth < 100) continue;
-      let el = f.parentElement, found = false;
-      for (let d = 0; el && d < 30; d++, el = el.parentElement) {
-        if (el.id && el.id.startsWith(prefix)) { found = true; break; }
-      }
-      if (found) indices.push(i);
-    }
-    return indices;
-  })()`);
+  const prefix = `form${formNum ?? 0}_`;
+  const iframeHandles = await page.$$('iframe');
 
-  const frames = page.frames();
   const allCells = new Map();
-  const frameMap = new Map(); // key 'r_c' → Playwright frame index
+  const frameMap = new Map(); // key 'r_c' → Playwright Frame object
 
-  for (const iframeIdx of iframeIndices) {
-    const frameIndex = iframeIdx + 1;
-    const frame = frames[frameIndex];
+  for (const handle of iframeHandles) {
+    const ok = await handle.evaluate((f, pfx) => {
+      if (f.offsetWidth < 100) return false;
+      let el = f.parentElement;
+      for (let d = 0; el && d < 30; d++, el = el.parentElement) {
+        if (el.id && el.id.startsWith(pfx)) return true;
+      }
+      return false;
+    }, prefix);
+    if (!ok) continue;
+
+    const frame = await handle.contentFrame();
     if (!frame) continue;
+
     try {
       const cells = await frame.evaluate(`(() => {
         const cells = [];
@@ -1014,7 +1010,7 @@ async function scanSpreadsheetCells(formNum) {
         const key = `${cell.r}_${cell.c}`;
         if (!allCells.has(key) || cell.t.length > allCells.get(key).t.length) {
           allCells.set(key, cell);
-          frameMap.set(key, frameIndex);
+          frameMap.set(key, frame);
         }
       }
     } catch { /* skip inaccessible frames */ }
@@ -1379,14 +1375,11 @@ async function clickSpreadsheetCell(target, { dblclick: dbl, modifier } = {}) {
   // Map rows[] index → physical row number
   const physRow = sortedRows[rowIdx];
   const cellKey = `${physRow}_${physCol}`;
-  const frameIndex = frameMap.get(cellKey);
-  if (!frameIndex) {
+  const frame = frameMap.get(cellKey);
+  if (!frame) {
     // Cell exists in mapping but might be empty — try clicking anyway
     throw new Error(`clickElement: cell at row=${JSON.stringify(target.row)}, column="${colName}" is empty or not rendered.`);
   }
-
-  // Get bounding box and click via page.mouse (bypasses mxlCurrBody overlay)
-  const frame = page.frames()[frameIndex];
   // Use [y]+[x] attributes — CSS class RxCy uses different numbering than y/x attrs.
   const cellDiv = frame.locator(`div[y="${physRow}"] div[x="${physCol}"]`).first();
   // Scroll cell into view using arrow keys — the only reliable way to scroll
@@ -1435,17 +1428,16 @@ async function findSpreadsheetCellByText(formNum, searchText) {
   }
   if (!found) return null;
 
-  const frameIndex = frameMap.get(found.key);
-  if (!frameIndex) return null;
+  const frame = frameMap.get(found.key);
+  if (!frame) return null;
 
-  const frame = page.frames()[frameIndex];
   // Scroll cell into view using native arrow-key mechanism
   const cellDiv = frame.locator(`div[y="${found.cell.r}"] div[x="${found.cell.c}"]`).first();
   await scrollSpreadsheetToCell(frame, found.cell.r, found.cell.c, cellDiv);
   const box = await cellDiv.boundingBox();
   if (!box) return null;
 
-  return { frameIndex, physRow: found.cell.r, physCol: found.cell.c, text: found.cell.t, box };
+  return { frame, physRow: found.cell.r, physCol: found.cell.c, text: found.cell.t, box };
 }
 
 /**
