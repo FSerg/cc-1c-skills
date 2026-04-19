@@ -142,7 +142,7 @@ Shorthand: `"Имя [Заголовок]: тип = значение @флаги"
 }
 ```
 
-В варианте настроек `"dataParameters": "auto"` автоматически генерирует записи для всех не-hidden параметров с `userSettingID`. Для `StandardPeriod` вариант периода наследуется из дефолта параметра (`Custom`, если не задан).
+В варианте настроек `"dataParameters": "auto"` автоматически генерирует записи для всех не-hidden параметров с `userSettingID`. Значения по умолчанию копируются из параметра с правильным xsi:type (boolean/decimal/date/string/DesignTimeValue для ссылочных, StandardPeriod — с наследованием variant). Параметры без дефолта или с `StandardPeriod=Custom` помечаются `<use>false</use>` и `<value xsi:nil="true"/>` (активируются пользователем).
 
 ### Фильтры — shorthand
 

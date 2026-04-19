@@ -1,4 +1,4 @@
-﻿# skd-compile v1.16 — Compile 1C DCS from JSON
+﻿# skd-compile v1.17 — Compile 1C DCS from JSON
 # Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 param(
 	[string]$DefinitionFile,
@@ -1847,7 +1847,10 @@ function Emit-DataParameters {
 		X "$indent`t`t<dcscor:parameter>$(Esc-Xml "$($dp.parameter)")</dcscor:parameter>"
 
 		# Value
-		if ($null -ne $dp.value) {
+		if ($dp.nilValue -eq $true) {
+			X "$indent`t`t<dcscor:value xsi:nil=`"true`"/>"
+		} elseif ($null -ne $dp.value) {
+			$vtype = "$($dp.valueType)"
 			if ($dp.value -is [PSCustomObject] -and $dp.value.variant) {
 				# StandardPeriod (object form from JSON)
 				X "$indent`t`t<dcscor:value xsi:type=`"v8:StandardPeriod`">"
@@ -1862,11 +1865,17 @@ function Emit-DataParameters {
 				X "$indent`t`t`t<v8:startDate>0001-01-01T00:00:00</v8:startDate>"
 				X "$indent`t`t`t<v8:endDate>0001-01-01T00:00:00</v8:endDate>"
 				X "$indent`t`t</dcscor:value>"
-			} elseif ($dp.value -is [bool]) {
+			} elseif ($vtype -eq 'boolean' -or $dp.value -is [bool]) {
 				$bv = "$($dp.value)".ToLower()
 				X "$indent`t`t<dcscor:value xsi:type=`"xs:boolean`">$(Esc-Xml $bv)</dcscor:value>"
-			} elseif ("$($dp.value)" -match '^\d{4}-\d{2}-\d{2}T') {
+			} elseif ($vtype -match '^date' -or "$($dp.value)" -match '^\d{4}-\d{2}-\d{2}T') {
 				X "$indent`t`t<dcscor:value xsi:type=`"xs:dateTime`">$(Esc-Xml "$($dp.value)")</dcscor:value>"
+			} elseif ($vtype -match '^decimal') {
+				X "$indent`t`t<dcscor:value xsi:type=`"xs:decimal`">$(Esc-Xml "$($dp.value)")</dcscor:value>"
+			} elseif ($vtype -match '^string') {
+				X "$indent`t`t<dcscor:value xsi:type=`"xs:string`">$(Esc-Xml "$($dp.value)")</dcscor:value>"
+			} elseif ("$($dp.value)" -match '^(ПланСчетов|Справочник|Перечисление|Документ|ПланВидовХарактеристик|ПланВидовРасчета|БизнесПроцесс|Задача|РегистрСведений|ПланОбмена)\.' -or "$($dp.value)" -match '^(ChartOfAccounts|Catalog|Enum|Document|ChartOfCharacteristicTypes|ChartOfCalculationTypes|BusinessProcess|Task|InformationRegister|ExchangePlan)\.') {
+				X "$indent`t`t<dcscor:value xsi:type=`"dcscor:DesignTimeValue`">$(Esc-Xml "$($dp.value)")</dcscor:value>"
 			} else {
 				X "$indent`t`t<dcscor:value xsi:type=`"xs:string`">$(Esc-Xml "$($dp.value)")</dcscor:value>"
 			}
@@ -2162,31 +2171,45 @@ function Emit-SettingsVariants {
 
 		# DataParameters
 		if ($s.dataParameters -eq 'auto') {
-			# Auto-generate dataParameters for all non-hidden params
+			# Auto-generate dataParameters for all non-hidden params.
+			# Pattern follows 1C Designer / ERP persistence:
+			#   - value set (non-default)     → emit value, use=true (implicit)
+			#   - value missing / Custom period → <use>false</use> + <value xsi:nil="true"/>
 			$autoDP = @()
 			foreach ($ap in $script:allParams) {
-				if (-not $ap.hidden) {
-					$dpItem = New-Object PSObject
-					$dpItem | Add-Member -NotePropertyName "parameter" -NotePropertyValue $ap.name
-					$dpItem | Add-Member -NotePropertyName "use" -NotePropertyValue $false
-					$dpItem | Add-Member -NotePropertyName "userSettingID" -NotePropertyValue "auto"
-					# For StandardPeriod emit <dcscor:value> with variant inherited from
-					# the parameter default (Custom if none) — matches how 1C Designer
-					# persists SettingsParameterValue for period parameters.
-					if ($ap.type -eq 'StandardPeriod') {
-						$variant = 'Custom'
-						$av = $ap.value
-						if ($null -ne $av) {
-							if (($av -is [PSCustomObject] -or $av -is [hashtable]) -and $av.variant) {
-								$variant = "$($av.variant)"
-							} elseif ("$av") {
-								$variant = "$av"
-							}
+				if ($ap.hidden) { continue }
+				$dpItem = New-Object PSObject
+				$dpItem | Add-Member -NotePropertyName "parameter" -NotePropertyValue $ap.name
+				$dpItem | Add-Member -NotePropertyName "userSettingID" -NotePropertyValue "auto"
+
+				$hasMeaningfulValue = $false
+
+				if ($ap.type -eq 'StandardPeriod') {
+					# Inherit variant; Custom is treated as "empty"
+					$variant = 'Custom'
+					$av = $ap.value
+					if ($null -ne $av) {
+						if (($av -is [PSCustomObject] -or $av -is [hashtable]) -and $av.variant) {
+							$variant = "$($av.variant)"
+						} elseif ("$av") {
+							$variant = "$av"
 						}
-						$dpItem | Add-Member -NotePropertyName "value" -NotePropertyValue @{ variant = $variant }
 					}
-					$autoDP += $dpItem
+					$dpItem | Add-Member -NotePropertyName "value" -NotePropertyValue @{ variant = $variant }
+					if ($variant -ne 'Custom') { $hasMeaningfulValue = $true }
+				} elseif ($null -ne $ap.value -and "$($ap.value)" -ne '') {
+					$dpItem | Add-Member -NotePropertyName "value" -NotePropertyValue $ap.value
+					$dpItem | Add-Member -NotePropertyName "valueType" -NotePropertyValue "$($ap.type)"
+					$hasMeaningfulValue = $true
+				} else {
+					$dpItem | Add-Member -NotePropertyName "nilValue" -NotePropertyValue $true
 				}
+
+				if (-not $hasMeaningfulValue) {
+					$dpItem | Add-Member -NotePropertyName "use" -NotePropertyValue $false
+				}
+
+				$autoDP += $dpItem
 			}
 			if ($autoDP.Count -gt 0) {
 				Emit-DataParameters -items $autoDP -indent "`t`t`t"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# skd-compile v1.16 — Compile 1C DCS from JSON
+# skd-compile v1.17 — Compile 1C DCS from JSON
 # Source: https://github.com/Nikolay-Shirokov/cc-1c-skills
 import argparse
 import json
@@ -1569,8 +1569,11 @@ def emit_data_parameters(lines, items, indent):
         lines.append(f'{indent}\t\t<dcscor:parameter>{esc_xml(str(dp["parameter"]))}</dcscor:parameter>')
 
         # Value
-        if dp.get('value') is not None:
+        if dp.get('nilValue') is True:
+            lines.append(f'{indent}\t\t<dcscor:value xsi:nil="true"/>')
+        elif dp.get('value') is not None:
             val = dp['value']
+            vtype = str(dp.get('valueType') or '')
             if isinstance(val, dict) and val.get('variant'):
                 # StandardPeriod
                 lines.append(f'{indent}\t\t<dcscor:value xsi:type="v8:StandardPeriod">')
@@ -1578,11 +1581,17 @@ def emit_data_parameters(lines, items, indent):
                 lines.append(f'{indent}\t\t\t<v8:startDate>0001-01-01T00:00:00</v8:startDate>')
                 lines.append(f'{indent}\t\t\t<v8:endDate>0001-01-01T00:00:00</v8:endDate>')
                 lines.append(f'{indent}\t\t</dcscor:value>')
-            elif isinstance(val, bool):
+            elif vtype == 'boolean' or isinstance(val, bool):
                 bv = str(val).lower()
                 lines.append(f'{indent}\t\t<dcscor:value xsi:type="xs:boolean">{esc_xml(bv)}</dcscor:value>')
-            elif re.match(r'^\d{4}-\d{2}-\d{2}T', str(val)):
+            elif re.match(r'^date', vtype) or re.match(r'^\d{4}-\d{2}-\d{2}T', str(val)):
                 lines.append(f'{indent}\t\t<dcscor:value xsi:type="xs:dateTime">{esc_xml(str(val))}</dcscor:value>')
+            elif re.match(r'^decimal', vtype):
+                lines.append(f'{indent}\t\t<dcscor:value xsi:type="xs:decimal">{esc_xml(str(val))}</dcscor:value>')
+            elif re.match(r'^string', vtype):
+                lines.append(f'{indent}\t\t<dcscor:value xsi:type="xs:string">{esc_xml(str(val))}</dcscor:value>')
+            elif re.match(r'^(\u041f\u043b\u0430\u043d\u0421\u0447\u0435\u0442\u043e\u0432|\u0421\u043f\u0440\u0430\u0432\u043e\u0447\u043d\u0438\u043a|\u041f\u0435\u0440\u0435\u0447\u0438\u0441\u043b\u0435\u043d\u0438\u0435|\u0414\u043e\u043a\u0443\u043c\u0435\u043d\u0442|\u041f\u043b\u0430\u043d\u0412\u0438\u0434\u043e\u0432\u0425\u0430\u0440\u0430\u043a\u0442\u0435\u0440\u0438\u0441\u0442\u0438\u043a|\u041f\u043b\u0430\u043d\u0412\u0438\u0434\u043e\u0432\u0420\u0430\u0441\u0447\u0435\u0442\u0430|\u0411\u0438\u0437\u043d\u0435\u0441\u041f\u0440\u043e\u0446\u0435\u0441\u0441|\u0417\u0430\u0434\u0430\u0447\u0430|\u0420\u0435\u0433\u0438\u0441\u0442\u0440\u0421\u0432\u0435\u0434\u0435\u043d\u0438\u0439|\u041f\u043b\u0430\u043d\u041e\u0431\u043c\u0435\u043d\u0430)\.', str(val)) or re.match(r'^(ChartOfAccounts|Catalog|Enum|Document|ChartOfCharacteristicTypes|ChartOfCalculationTypes|BusinessProcess|Task|InformationRegister|ExchangePlan)\.', str(val)):
+                lines.append(f'{indent}\t\t<dcscor:value xsi:type="dcscor:DesignTimeValue">{esc_xml(str(val))}</dcscor:value>')
             else:
                 lines.append(f'{indent}\t\t<dcscor:value xsi:type="xs:string">{esc_xml(str(val))}</dcscor:value>')
 
@@ -1815,28 +1824,42 @@ def emit_settings_variants(lines, defn):
 
         # DataParameters
         if s.get('dataParameters') == 'auto':
-            # Auto-generate dataParameters for all non-hidden params
+            # Auto-generate dataParameters for all non-hidden params.
+            # Pattern follows 1C Designer / ERP persistence:
+            #   value set (non-default) → emit value, use=true (implicit)
+            #   value missing / Custom period → <use>false</use> + <value xsi:nil="true"/>
             auto_dp = []
             for ap in _all_params:
-                if not ap['hidden']:
-                    item = {
-                        'parameter': ap['name'],
-                        'use': False,
-                        'userSettingID': 'auto',
-                    }
-                    # For StandardPeriod emit <dcscor:value> with variant inherited
-                    # from the parameter default (Custom if none) — matches how
-                    # 1C Designer persists SettingsParameterValue for period params.
-                    if ap.get('type') == 'StandardPeriod':
-                        variant = 'Custom'
-                        av = ap.get('value')
-                        if av is not None:
-                            if isinstance(av, dict) and av.get('variant'):
-                                variant = str(av['variant'])
-                            elif str(av):
-                                variant = str(av)
-                        item['value'] = {'variant': variant}
-                    auto_dp.append(item)
+                if ap['hidden']:
+                    continue
+                item = {
+                    'parameter': ap['name'],
+                    'userSettingID': 'auto',
+                }
+                has_meaningful_value = False
+
+                if ap.get('type') == 'StandardPeriod':
+                    variant = 'Custom'
+                    av = ap.get('value')
+                    if av is not None:
+                        if isinstance(av, dict) and av.get('variant'):
+                            variant = str(av['variant'])
+                        elif str(av):
+                            variant = str(av)
+                    item['value'] = {'variant': variant}
+                    if variant != 'Custom':
+                        has_meaningful_value = True
+                elif ap.get('value') is not None and str(ap.get('value')) != '':
+                    item['value'] = ap['value']
+                    item['valueType'] = str(ap.get('type') or '')
+                    has_meaningful_value = True
+                else:
+                    item['nilValue'] = True
+
+                if not has_meaningful_value:
+                    item['use'] = False
+
+                auto_dp.append(item)
             if auto_dp:
                 emit_data_parameters(lines, auto_dp, '\t\t\t')
         elif s.get('dataParameters'):
